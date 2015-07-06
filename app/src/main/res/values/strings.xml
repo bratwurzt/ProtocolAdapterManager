@@ -3,7 +3,7 @@
 
     <string name="app_name">Protocol Adapter</string>
     <string name="btn_send_command">Send Command</string>
-    <string name="btn_connect_devices">Connect to Device</string>
+    <string name="btn_connect_devices">Connect</string>
     <string name="btn_stop_pa">Stop Protocol Adapter</string>
     <string name="btn_start_pa">Start Protocol Adapter</string>
     <string name="btn_start_da">Start Device Adapter</string>
@@ -20,7 +20,7 @@
     <string name="lbl_device_adapter">Device Adapter</string>
     <string name="lbl_parameter">Parameter</string>
     <string name="lbl_command">Command</string>
-    <string name="btn_disconnect_devices">Disconnect from Device</string>
+    <string name="btn_disconnect_devices">Disconnect</string>
     <string name="configure_da">Choose the DA to configure</string>
     <string name="disconnect_dev">Choose the device to disconnect</string>
     <string name="connect_dev">Choose the device to connect to</string>

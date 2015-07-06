@@ -7,13 +7,14 @@
     android:paddingLeft="@dimen/activity_horizontal_margin"
     android:paddingRight="@dimen/activity_horizontal_margin"
     android:paddingTop="@dimen/activity_vertical_margin"
+    android:weightSum="1"
     tools:context="eu.fistar.sdcs.pa.MainActivity">
 
     <ScrollView
         android:id="@+id/scrollview"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="4">
+        android:layout_weight="0.30">
 
         <RelativeLayout
             android:layout_width="match_parent"
@@ -101,8 +102,13 @@
                         android:text="@string/btn_config_da" />
 
                 </LinearLayout>
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:orientation="horizontal">
 
-                <Button
+                  <Button
                     android:id="@+id/btnConnectDevices"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
@@ -133,7 +139,7 @@
                     android:enabled="true"
                     android:onClick="clearLogs"
                     android:text="@string/btn_clear_logs" />
-
+          </LinearLayout>
             </LinearLayout>
 
         </RelativeLayout>
@@ -144,7 +150,7 @@
         android:id="@+id/scrollBox"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1">
+        android:layout_weight="0.70">
 
         <TextView
             android:id="@+id/logBox"

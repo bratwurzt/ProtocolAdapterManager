@@ -772,13 +772,13 @@ public class PAManagerService extends Service {
          */
         @Override
         public void pushData(List<Observation> observations, DeviceDescription devDesc) {
-            String dataStr = "";
+            String dataType = "";
             for (Observation obs : observations) {
-                dataStr += obs.toString() + "\n";
+                dataType += obs.getPropertyName() + "\n";
             }
             Log.i(PAAndroidConstants.PA_LOGTAG, "Received data to push\n" +
                     "Device: " + devDesc.getDeviceID() +
-                    "Data: " + dataStr);
+                    "DataType: " + dataType);
 
             try {
                 appApi.pushData(observations, devDesc);
