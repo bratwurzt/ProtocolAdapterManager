@@ -18,15 +18,22 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
+import android.graphics.Color;
 import android.os.Bundle;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.os.RemoteException;
 import android.support.v4.app.FragmentActivity;
 import android.util.Log;
 import android.view.View;
-import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
+import com.artfulbits.aiCharts.Base.ChartArea;
+import com.artfulbits.aiCharts.Base.ChartAxisStripLine;
+import com.artfulbits.aiCharts.Base.ChartPointCollection;
+import com.artfulbits.aiCharts.Base.ChartSeries;
+import com.artfulbits.aiCharts.ChartView;
 import eu.fistar.sdcs.pa.common.Capabilities;
 import eu.fistar.sdcs.pa.common.DeviceDescription;
 import eu.fistar.sdcs.pa.common.IProtocolAdapter;
@@ -52,9 +59,17 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
 {
 
   private static final String LOGTAG = "PA Activity";
-
+  static final int POINTS_COUNT = 1000;
+  static final int UPDATE_STEP = 250;
   private IProtocolAdapter pa;
 
+  private Handler mHandler = null;
+  private LooperThread looperThread;
+  private ChartView m_chartView;
+  ChartSeries m_series;
+  ChartAxisStripLine m_updateLine = new ChartAxisStripLine(1, 0);
+  int m_dataOffset = 1;
+  int m_pointOffset = 0;
   private ServiceConnection serv = new ServiceConnection()
   {
     @Override
@@ -94,8 +109,10 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
       pa = IProtocolAdapter.Stub.asInterface(iBinder);
       try
       {
+        looperThread = new LooperThread();
+        pa.registerPAListener(looperThread);
+        new Thread(looperThread).start();
         // Registering listener
-        pa.registerPAListener(paListener);
 
         // Start all the Device Adapters of the system
         @SuppressWarnings("unchecked")
@@ -118,75 +135,149 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
     public void onServiceDisconnected(ComponentName componentName)
     {
       updateLog("Protocol Adapter disconnected unexpectedly");
+      mHandler.getLooper().quit();
     }
   };
 
   /**
    * Dummy implementation of the IProtocolAdapterListener interface which just prints on the logs all the data received by the Protocol Adapter.
    */
-  private final IProtocolAdapterListener.Stub paListener = new IProtocolAdapterListener.Stub()
+
+  class LooperThread extends IProtocolAdapterListener.Stub implements Runnable
   {
     @Override
-    public void registerDevice(DeviceDescription deviceDescription, String daId) throws RemoteException
+    public void run()
     {
-      updateLog("Device registered " + deviceDescription.getDeviceID() + ", handled by Device Adapter " + daId);
+      Looper.prepare();
+      mHandler = new Handler();
+      Looper.loop();
     }
 
     @Override
-    public void pushData(List<Observation> observations, DeviceDescription deviceDescription) throws RemoteException
+    public void registerDevice(DeviceDescription deviceDescription, String daId) throws RemoteException
     {
-      for (Observation observation : observations)
+      this.updateLog("Device registered " + deviceDescription.getDeviceID() + ", handled by Device Adapter " + daId);
+    }
+
+    @Override
+    public void pushData(final List<Observation> observations, DeviceDescription deviceDescription) throws RemoteException
+    {
+      m_chartView.post(new Runnable()
       {
-        updateLog("sysT:" + System.currentTimeMillis() +
-            ", devT:" + observation.getPhenomenonTime() +
-            ", dur: " + observation.getDuration() +
-            ", type:" + observation.getPropertyName() +
-            ", num:" + observation.getValues().size()
-        );
-      }
+        @Override
+        public void run()
+        {
+          m_pointOffset += UPDATE_STEP;
+
+          if (m_pointOffset >= m_series.getPoints().size())
+          {
+            m_pointOffset = 0;
+            m_dataOffset++;
+          }
+
+          ChartPointCollection points = m_series.getPoints();
+
+          points.beginUpdate();
+
+          for (Observation observation : observations)
+          {
+            if ("ecg".equals(observation.getPropertyName()))
+            {
+              //long sampleTime = observation.getDuration() / observation.getValues().size();
+              //long currentTime = observation.getPhenomenonTime();
+
+              for (int i = 0; i < UPDATE_STEP; i++)
+              {
+                int pointIndex = (m_pointOffset + i) % m_series.getPoints().size();
+                int dataIndex = (m_dataOffset + pointIndex) % observation.getValues().size();
+
+                points.get(pointIndex).setY(Double.parseDouble(observation.getValues().get(dataIndex)));
+              }
+            }
+            points.endUpdate();
+            m_updateLine.setStart(m_pointOffset + UPDATE_STEP);
+          }
+        }
+      });
     }
 
     @Override
     public void deregisterDevice(DeviceDescription deviceDescription) throws RemoteException
     {
-      updateLog("Device deregistered " + deviceDescription.getDeviceID());
+      this.updateLog("Device deregistered " + deviceDescription.getDeviceID());
     }
 
     @Override
     public void registerDeviceProperties(DeviceDescription deviceDescription) throws RemoteException
     {
-      updateLog("Device properties registered: " + deviceDescription.getDeviceID());
+      this.updateLog("Device properties registered: " + deviceDescription.getDeviceID());
     }
 
     @Override
     public void deviceDisconnected(DeviceDescription deviceDescription) throws RemoteException
     {
-      updateLog("Device disconnected: " + deviceDescription.getDeviceID());
+      this.updateLog("Device disconnected: " + deviceDescription.getDeviceID());
     }
 
     @Override
     public void log(int logLevel, String daId, String message) throws RemoteException
     {
-      updateLog("LOG! Level: " + logLevel + "; DA: " + daId + "; Message: " + message + ";");
+      this.updateLog("LOG! Level: " + logLevel + "; DA: " + daId + "; Message: " + message + ";");
     }
 
     @Override
     public void onDAConnected(String daId) throws RemoteException
     {
-      updateLog("Device Adapter " + daId + " completed the initialization phase");
+      this.updateLog("Device Adapter " + daId + " completed the initialization phase");
     }
-  };
+
+    private void updateLog(String log)
+    {
+      Log.d(LOGTAG, log);
+
+      //final String fLog = log;
+      //
+      //final TextView tv = (TextView)findViewById(R.id.logBox);
+      //tv.post(new Runnable()
+      //{
+      //  @Override
+      //  public void run()
+      //  {
+      //    tv.append(fLog + "\n");
+      //  }
+      //});
+      //
+      //final ScrollView sv = (ScrollView)findViewById(R.id.scrollBox);
+      //sv.postDelayed(new Runnable()
+      //{
+      //  @Override
+      //  public void run()
+      //  {
+      //    sv.fullScroll(ScrollView.FOCUS_DOWN);
+      //  }
+      //}, 100L);
+    }
+  }
 
   @Override
   protected void onCreate(Bundle savedInstanceState)
   {
     super.onCreate(savedInstanceState);
     setContentView(R.layout.activity_main);
+    m_chartView = (ChartView)findViewById(R.id.chartView);
+    ChartArea area = m_chartView.getAreas().get(0);
+    area.getDefaultXAxis().getGridLinePaint().setColor(Color.DKGRAY);
+    area.getDefaultYAxis().getGridLinePaint().setColor(Color.DKGRAY);
+    area.getDefaultXAxis().getStripLines().add(m_updateLine);
+    m_series = m_chartView.getSeries().get(0);
+    for (int i = 0; i <= POINTS_COUNT; i++)
+    		{
+    			m_series.getPoints().addXY(i, 0.0d);
+    		}
   }
 
   public void startService(View v)
   {
-
     updateLog("Starting the Protocol Adapter");
 
     // Create the Intent to start the PA with
@@ -198,7 +289,6 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
 
   public void stopService(View v)
   {
-
     updateLog("Stopping the Protocol Adapter");
 
     // Unbind the service
@@ -465,33 +555,33 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
 
   public void clearLogs(View v)
   {
-    ((TextView)findViewById(R.id.logBox)).setText("");
+    //((TextView)findViewById(R.id.logBox)).setText("");
   }
 
   private void updateLog(String log)
   {
     Log.d(LOGTAG, log);
 
-    final String fLog = log;
-
-    final TextView tv = (TextView)findViewById(R.id.logBox);
-    tv.post(new Runnable()
-    {
-      @Override
-      public void run()
-      {
-        tv.append(fLog + "\n");
-      }
-    });
-
-    final ScrollView sv = (ScrollView)findViewById(R.id.scrollBox);
-    sv.postDelayed(new Runnable()
-    {
-      @Override
-      public void run()
-      {
-        sv.fullScroll(ScrollView.FOCUS_DOWN);
-      }
-    }, 100L);
+    //final String fLog = log;
+    //
+    //final TextView tv = (TextView)findViewById(R.id.logBox);
+    //tv.post(new Runnable()
+    //{
+    //  @Override
+    //  public void run()
+    //  {
+    //    tv.append(fLog + "\n");
+    //  }
+    //});
+    //
+    //final ScrollView sv = (ScrollView)findViewById(R.id.scrollBox);
+    //sv.postDelayed(new Runnable()
+    //{
+    //  @Override
+    //  public void run()
+    //  {
+    //    sv.fullScroll(ScrollView.FOCUS_DOWN);
+    //  }
+    //}, 100L);
   }
 }
