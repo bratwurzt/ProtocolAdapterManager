@@ -8,6 +8,9 @@
 
 package eu.fistar.sdcs.pa;
 
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -18,8 +21,8 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
-import android.graphics.Color;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
@@ -27,13 +30,11 @@ import android.os.RemoteException;
 import android.support.v4.app.FragmentActivity;
 import android.util.Log;
 import android.view.View;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
-import com.artfulbits.aiCharts.Base.ChartArea;
 import com.artfulbits.aiCharts.Base.ChartAxisStripLine;
-import com.artfulbits.aiCharts.Base.ChartPointCollection;
 import com.artfulbits.aiCharts.Base.ChartSeries;
-import com.artfulbits.aiCharts.ChartView;
 import eu.fistar.sdcs.pa.common.Capabilities;
 import eu.fistar.sdcs.pa.common.DeviceDescription;
 import eu.fistar.sdcs.pa.common.IProtocolAdapter;
@@ -65,11 +66,9 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
 
   private Handler mHandler = null;
   private LooperThread looperThread;
-  private ChartView m_chartView;
   ChartSeries m_series;
   ChartAxisStripLine m_updateLine = new ChartAxisStripLine(1, 0);
-  int m_dataOffset = 1;
-  int m_pointOffset = 0;
+  int min = Integer.MAX_VALUE, max = 0;
   private ServiceConnection serv = new ServiceConnection()
   {
     @Override
@@ -145,9 +144,21 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
 
   class LooperThread extends IProtocolAdapterListener.Stub implements Runnable
   {
+    PrintWriter breathingOut = null, generalOut = null;
+    long timeOfOne,currTime;
+    boolean generalHeadersFilled = false, breathingHeadersFilled = false;
     @Override
     public void run()
     {
+      try
+      {
+        breathingOut = new PrintWriter(new File(getExternalFilesDir(Environment.DIRECTORY_NOTIFICATIONS), "breathing_zephyr.csv"));
+        generalOut = new PrintWriter(new File(getExternalFilesDir(Environment.DIRECTORY_NOTIFICATIONS), "general_zephyr.csv"));
+      }
+      catch (FileNotFoundException e)
+      {
+        e.printStackTrace();
+      }
       Looper.prepare();
       mHandler = new Handler();
       Looper.loop();
@@ -162,43 +173,46 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
     @Override
     public void pushData(final List<Observation> observations, DeviceDescription deviceDescription) throws RemoteException
     {
-      m_chartView.post(new Runnable()
+      if (observations.size() == 25) // GENERAL
       {
-        @Override
-        public void run()
+        if (!generalHeadersFilled)
         {
-          m_pointOffset += UPDATE_STEP;
-
-          if (m_pointOffset >= m_series.getPoints().size())
-          {
-            m_pointOffset = 0;
-            m_dataOffset++;
-          }
-
-          ChartPointCollection points = m_series.getPoints();
-
-          points.beginUpdate();
-
+          generalOut.print("milis,");
           for (Observation observation : observations)
           {
-            if ("ecg".equals(observation.getPropertyName()))
-            {
-              //long sampleTime = observation.getDuration() / observation.getValues().size();
-              //long currentTime = observation.getPhenomenonTime();
+            generalOut.print(observation.getPropertyName() + ",");
+          }
+          generalOut.println();
+          generalHeadersFilled = true;
+        }
 
-              for (int i = 0; i < UPDATE_STEP; i++)
-              {
-                int pointIndex = (m_pointOffset + i) % m_series.getPoints().size();
-                int dataIndex = (m_dataOffset + pointIndex) % observation.getValues().size();
+        currTime = observations.get(0).getPhenomenonTime();
+        generalOut.print(currTime + ",");
+        for (Observation observation : observations)
+        {
+          generalOut.print(observation.getValues().get(0) + ",");
+        }
+        generalOut.println();
+      }
+      else if ("breathing".equals(observations.get(0).getPropertyName()))
+      {
+        if (!breathingHeadersFilled)
+        {
+          breathingOut.println("milis,breathing");
+          breathingHeadersFilled = true;
+        }
 
-                points.get(pointIndex).setY(Double.parseDouble(observation.getValues().get(dataIndex)));
-              }
-            }
-            points.endUpdate();
-            m_updateLine.setStart(m_pointOffset + UPDATE_STEP);
+        for (Observation observation : observations)
+        {
+          timeOfOne = observation.getDuration() / observation.getValues().size();
+          currTime = observation.getPhenomenonTime();
+          for (String value : observation.getValues())
+          {
+            currTime += timeOfOne;
+            breathingOut.println(currTime + "," + value);
           }
         }
-      });
+      }
     }
 
     @Override
@@ -217,6 +231,8 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
     public void deviceDisconnected(DeviceDescription deviceDescription) throws RemoteException
     {
       this.updateLog("Device disconnected: " + deviceDescription.getDeviceID());
+      breathingOut.close();
+      generalOut.close();
     }
 
     @Override
@@ -235,27 +251,27 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
     {
       Log.d(LOGTAG, log);
 
-      //final String fLog = log;
-      //
-      //final TextView tv = (TextView)findViewById(R.id.logBox);
-      //tv.post(new Runnable()
-      //{
-      //  @Override
-      //  public void run()
-      //  {
-      //    tv.append(fLog + "\n");
-      //  }
-      //});
-      //
-      //final ScrollView sv = (ScrollView)findViewById(R.id.scrollBox);
-      //sv.postDelayed(new Runnable()
-      //{
-      //  @Override
-      //  public void run()
-      //  {
-      //    sv.fullScroll(ScrollView.FOCUS_DOWN);
-      //  }
-      //}, 100L);
+      final String fLog = log;
+
+      final TextView tv = (TextView)findViewById(R.id.logBox);
+      tv.post(new Runnable()
+      {
+        @Override
+        public void run()
+        {
+          tv.append(fLog + "\n");
+        }
+      });
+
+      final ScrollView sv = (ScrollView)findViewById(R.id.scrollBox);
+      sv.postDelayed(new Runnable()
+      {
+        @Override
+        public void run()
+        {
+          sv.fullScroll(ScrollView.FOCUS_DOWN);
+        }
+      }, 100L);
     }
   }
 
@@ -264,16 +280,6 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
   {
     super.onCreate(savedInstanceState);
     setContentView(R.layout.activity_main);
-    m_chartView = (ChartView)findViewById(R.id.chartView);
-    ChartArea area = m_chartView.getAreas().get(0);
-    area.getDefaultXAxis().getGridLinePaint().setColor(Color.DKGRAY);
-    area.getDefaultYAxis().getGridLinePaint().setColor(Color.DKGRAY);
-    area.getDefaultXAxis().getStripLines().add(m_updateLine);
-    m_series = m_chartView.getSeries().get(0);
-    for (int i = 0; i <= POINTS_COUNT; i++)
-    		{
-    			m_series.getPoints().addXY(i, 0.0d);
-    		}
   }
 
   public void startService(View v)
@@ -562,26 +568,26 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
   {
     Log.d(LOGTAG, log);
 
-    //final String fLog = log;
-    //
-    //final TextView tv = (TextView)findViewById(R.id.logBox);
-    //tv.post(new Runnable()
-    //{
-    //  @Override
-    //  public void run()
-    //  {
-    //    tv.append(fLog + "\n");
-    //  }
-    //});
-    //
-    //final ScrollView sv = (ScrollView)findViewById(R.id.scrollBox);
-    //sv.postDelayed(new Runnable()
-    //{
-    //  @Override
-    //  public void run()
-    //  {
-    //    sv.fullScroll(ScrollView.FOCUS_DOWN);
-    //  }
-    //}, 100L);
+    final String fLog = log;
+
+    final TextView tv = (TextView)findViewById(R.id.logBox);
+    tv.post(new Runnable()
+    {
+      @Override
+      public void run()
+      {
+        tv.append(fLog + "\n");
+      }
+    });
+
+    final ScrollView sv = (ScrollView)findViewById(R.id.scrollBox);
+    sv.postDelayed(new Runnable()
+    {
+      @Override
+      public void run()
+      {
+        sv.fullScroll(ScrollView.FOCUS_DOWN);
+      }
+    }, 100L);
   }
 }
