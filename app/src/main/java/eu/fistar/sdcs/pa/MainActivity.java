@@ -11,7 +11,9 @@ package eu.fistar.sdcs.pa;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.PrintWriter;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -33,8 +35,6 @@ import android.view.View;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
-import com.artfulbits.aiCharts.Base.ChartAxisStripLine;
-import com.artfulbits.aiCharts.Base.ChartSeries;
 import eu.fistar.sdcs.pa.common.Capabilities;
 import eu.fistar.sdcs.pa.common.DeviceDescription;
 import eu.fistar.sdcs.pa.common.IProtocolAdapter;
@@ -58,7 +58,7 @@ import eu.fistar.sdcs.pa.dialogs.StopDaDialogFragment;
  */
 public class MainActivity extends FragmentActivity implements IPADialogListener
 {
-
+  private final SimpleDateFormat m_dateFormat = new SimpleDateFormat("yyyyMMddhhmm'.csv'");
   private static final String LOGTAG = "PA Activity";
   static final int POINTS_COUNT = 1000;
   static final int UPDATE_STEP = 250;
@@ -66,9 +66,11 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
 
   private Handler mHandler = null;
   private LooperThread looperThread;
-  ChartSeries m_series;
-  ChartAxisStripLine m_updateLine = new ChartAxisStripLine(1, 0);
   int min = Integer.MAX_VALUE, max = 0;
+  PrintWriter breathingOut = null, generalOut = null, rToROut = null, accelOut = null, heartRateOut = null, ecgRateOut = null;
+  private String format = m_dateFormat.format(new Date());
+  private File externalFilesDir;
+
   private ServiceConnection serv = new ServiceConnection()
   {
     @Override
@@ -144,21 +146,12 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
 
   class LooperThread extends IProtocolAdapterListener.Stub implements Runnable
   {
-    PrintWriter breathingOut = null, generalOut = null;
-    long timeOfOne,currTime;
-    boolean generalHeadersFilled = false, breathingHeadersFilled = false;
+    long timeOfOne, currTime;
+    boolean generalHeadersFilled = false, breathingHeadersFilled = false, rToRHeadersFilled = false, accelHeadersFilled = false, heartRateHeadersFilled = false, ecgHeadersFilled = false;
+
     @Override
     public void run()
     {
-      try
-      {
-        breathingOut = new PrintWriter(new File(getExternalFilesDir(Environment.DIRECTORY_NOTIFICATIONS), "breathing_zephyr.csv"));
-        generalOut = new PrintWriter(new File(getExternalFilesDir(Environment.DIRECTORY_NOTIFICATIONS), "general_zephyr.csv"));
-      }
-      catch (FileNotFoundException e)
-      {
-        e.printStackTrace();
-      }
       Looper.prepare();
       mHandler = new Handler();
       Looper.loop();
@@ -173,43 +166,104 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
     @Override
     public void pushData(final List<Observation> observations, DeviceDescription deviceDescription) throws RemoteException
     {
-      if (observations.size() == 25) // GENERAL
+      if (observations != null && observations.size() > 0)
       {
-        if (!generalHeadersFilled)
+        if (observations.size() == 25) // GENERAL
         {
-          generalOut.print("milis,");
+          if (!generalHeadersFilled)
+          {
+            getGeneralOut().print("milis,");
+            for (Observation observation : observations)
+            {
+              getGeneralOut().print(observation.getPropertyName() + ",");
+            }
+            getGeneralOut().println();
+            generalHeadersFilled = true;
+          }
+
+          currTime = observations.get(0).getPhenomenonTime();
+          getGeneralOut().print(currTime + ",");
           for (Observation observation : observations)
           {
-            generalOut.print(observation.getPropertyName() + ",");
+            getGeneralOut().print(observation.getValues().get(0) + ",");
           }
-          generalOut.println();
-          generalHeadersFilled = true;
+          getGeneralOut().println();
         }
-
-        currTime = observations.get(0).getPhenomenonTime();
-        generalOut.print(currTime + ",");
-        for (Observation observation : observations)
+        else
         {
-          generalOut.print(observation.getValues().get(0) + ",");
-        }
-        generalOut.println();
-      }
-      else if ("breathing".equals(observations.get(0).getPropertyName()))
-      {
-        if (!breathingHeadersFilled)
-        {
-          breathingOut.println("milis,breathing");
-          breathingHeadersFilled = true;
-        }
-
-        for (Observation observation : observations)
-        {
-          timeOfOne = observation.getDuration() / observation.getValues().size();
-          currTime = observation.getPhenomenonTime();
-          for (String value : observation.getValues())
+          String propertyName = observations.get(0).getPropertyName();
+          if (propertyName.startsWith("accelerometer")) // acc
           {
-            currTime += timeOfOne;
-            breathingOut.println(currTime + "," + value);
+            if (!accelHeadersFilled)
+            {
+              getAccelOut().println("milis,breathing");
+              accelHeadersFilled = true;
+            }
+          }
+          else if ("r to r".equals(propertyName))
+          {
+            if (!rToRHeadersFilled)
+            {
+              getrToROut().println("milis,rToRMillis");
+              rToRHeadersFilled = true;
+            }
+
+            for (Observation observation : observations)
+            {
+              timeOfOne = observation.getDuration() / observation.getValues().size();
+              currTime = observation.getPhenomenonTime();
+              for (String value : observation.getValues())
+              {
+                currTime += timeOfOne;
+                getrToROut().println(currTime + "," + value);
+              }
+            }
+          }
+          else if ("heart rate".equals(propertyName))
+          {
+            if (!heartRateHeadersFilled)
+            {
+              getHeartRateOut().println("milis,breathing");
+              heartRateHeadersFilled = true;
+            }
+          }
+          else if ("ecg".equals(propertyName))
+          {
+            if (!ecgHeadersFilled)
+            {
+              getEcgRateOut().println("milis,mV");
+              ecgHeadersFilled = true;
+            }
+
+            for (Observation observation : observations)
+            {
+              timeOfOne = observation.getDuration() / observation.getValues().size();
+              currTime = observation.getPhenomenonTime();
+              for (String value : observation.getValues())
+              {
+                currTime += timeOfOne;
+                getEcgRateOut().println(currTime + "," + value);
+              }
+            }
+          }
+          else if ("breathing".equals(propertyName))
+          {
+            if (!breathingHeadersFilled)
+            {
+              getBreathingOut().println("milis,breathing");
+              breathingHeadersFilled = true;
+            }
+
+            for (Observation observation : observations)
+            {
+              timeOfOne = observation.getDuration() / observation.getValues().size();
+              currTime = observation.getPhenomenonTime();
+              for (String value : observation.getValues())
+              {
+                currTime += timeOfOne;
+                getBreathingOut().println(currTime + "," + value);
+              }
+            }
           }
         }
       }
@@ -231,8 +285,30 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
     public void deviceDisconnected(DeviceDescription deviceDescription) throws RemoteException
     {
       this.updateLog("Device disconnected: " + deviceDescription.getDeviceID());
-      breathingOut.close();
-      generalOut.close();
+      if (getBreathingOut() != null)
+      {
+        getBreathingOut().close();
+      }
+      if (getGeneralOut() != null)
+      {
+        getGeneralOut().close();
+      }
+      if (getrToROut() != null)
+      {
+        getrToROut().close();
+      }
+      if (getAccelOut() != null)
+      {
+        getAccelOut().close();
+      }
+      if (getHeartRateOut() != null)
+      {
+        getHeartRateOut().close();
+      }
+      if (getEcgRateOut() != null)
+      {
+        getEcgRateOut().close();
+      }
     }
 
     @Override
@@ -275,11 +351,66 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
     }
   }
 
+  private PrintWriter getHeartRateOut()
+  {
+    if (heartRateOut == null)
+    {
+      heartRateOut = managePrintWriter(heartRateOut, "heartRate", true);
+    }
+    return heartRateOut;
+  }
+
+  private PrintWriter getAccelOut()
+  {
+    if (accelOut == null)
+    {
+      accelOut = managePrintWriter(accelOut, "acc", true);
+    }
+    return accelOut;
+  }
+
+  private PrintWriter getrToROut()
+  {
+    if (rToROut == null)
+    {
+      rToROut = managePrintWriter(rToROut, "rtor", true);
+    }
+    return rToROut;
+  }
+
+  private PrintWriter getGeneralOut()
+  {
+    if (generalOut == null)
+    {
+      generalOut = managePrintWriter(generalOut, "general", true);
+    }
+    return generalOut;
+  }
+
+  private PrintWriter getBreathingOut()
+  {
+    if (breathingOut == null)
+    {
+      breathingOut = managePrintWriter(breathingOut, "breathing", true);
+    }
+    return breathingOut;
+  }
+
+  private PrintWriter getEcgRateOut()
+  {
+    if (ecgRateOut == null)
+    {
+      ecgRateOut = managePrintWriter(ecgRateOut, "ecg", true);
+    }
+    return ecgRateOut;
+  }
+
   @Override
   protected void onCreate(Bundle savedInstanceState)
   {
     super.onCreate(savedInstanceState);
     setContentView(R.layout.activity_main);
+    externalFilesDir = getExternalFilesDir(Environment.DIRECTORY_NOTIFICATIONS);
   }
 
   public void startService(View v)
@@ -336,6 +467,10 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
       // Connect to the specified device
       updateLog("Connecting to device: " + devId);
       pa.forceConnectDev(devId, daId);
+      //sendCommand("enableAccelerometerData", "", devId);
+      //sendCommand("enableBreathingData", "", devId);
+      //sendCommand("enableRtoRData", "", devId);
+      //sendCommand("enableGeneralData", "", devId);
     }
     catch (RemoteException e)
     {
@@ -364,11 +499,60 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
     try
     {
       pa.execCommand(command, parameter != null ? parameter : "", devId);
+      boolean enable = command.startsWith("enable");
+      if (!enable)
+      {
+        if (command.endsWith("GeneralData"))
+        {
+          generalOut = managePrintWriter(generalOut, "general", enable);
+        }
+        else if (command.endsWith("AccelerometerData"))
+        {
+          accelOut = managePrintWriter(accelOut, "acc", enable);
+        }
+        else if (command.endsWith("BreathingData"))
+        {
+          breathingOut = managePrintWriter(breathingOut, "breathing", enable);
+        }
+        else if (command.endsWith("EcgData"))
+        {
+          ecgRateOut = managePrintWriter(ecgRateOut, "ecg", enable);
+        }
+        else if (command.endsWith("HeartRateData"))
+        {
+          heartRateOut = managePrintWriter(heartRateOut, "heartRate", enable);
+        }
+        else if (command.endsWith("RtoRData"))
+        {
+          rToROut = managePrintWriter(rToROut, "rtor", enable);
+        }
+      }
     }
     catch (RemoteException e)
     {
       updateLog("Error executing command");
     }
+  }
+
+  private PrintWriter managePrintWriter(PrintWriter pOut, String logName, boolean enable)
+  {
+    try
+    {
+      if (enable)
+      {
+        pOut = new PrintWriter(new File(externalFilesDir, "zephyr_" + logName + format));
+      }
+      else if (pOut != null)
+      {
+        pOut.close();
+      }
+      return pOut;
+    }
+    catch (FileNotFoundException e)
+    {
+      e.printStackTrace();
+    }
+    return pOut;
   }
 
   @Override
