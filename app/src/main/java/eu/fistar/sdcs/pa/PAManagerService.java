@@ -58,7 +58,6 @@ import org.json.JSONException;
  */
 public class PAManagerService extends Service
 {
-
   // SharedPreferences related constants
   private final static String SHPREF_FILENAME = "listSync";
   private final static String SHPREF_WHITELIST_NAME = "whitelist";
@@ -83,7 +82,6 @@ public class PAManagerService extends Service
   // Implementation of the Protocol Adapter API (IProtocolAdapter) to pass to the Application
   private final IProtocolAdapter.Stub appEndpoint = new IProtocolAdapter.Stub()
   {
-
     /**
      * Returns a list of all the devices connected at the moment in all Device Adapters.
      *
@@ -99,7 +97,6 @@ public class PAManagerService extends Service
       // Scan all connected DAs
       for (String tmpDaName : connectedDAs.keySet())
       {
-
         // Retrieve the Capabilities of the DA
         Capabilities cap = availableDAs.get(tmpDaName);
 
@@ -109,7 +106,6 @@ public class PAManagerService extends Service
           connectedDev.addAll(connectedDAs.get(tmpDaName).getConnectedDevices());
         }
       }
-
       // Return the list of devices
       return connectedDev;
     }
@@ -126,31 +122,24 @@ public class PAManagerService extends Service
     public Map<String, List<String>> getDADevices() throws RemoteException
     {
       Log.i(PAAndroidConstants.PA_LOGTAG, "Fetching paired devices address");
-
       Map<String, List<String>> daDev = new HashMap<String, List<String>>();
 
       // For each connected DA...
       for (IDeviceAdapter tmpDa : connectedDAs.values())
       {
-
         // ... retrieve the Capabilities of the DA...
         Capabilities cap = tmpDa.getDACapabilities();
-
         // ... then if it can provide the paired devices...
         if (cap.canProvideAvailableDevice())
         {
-
           // ... retrieve all the managed paired devices and the DA ID...
           List<String> daPairedDev = tmpDa.getPairedDevicesAddress();
           String daId = cap.getPackageName();
-
           // ... and for each device...
           for (String dev : daPairedDev)
           {
-
             // ... check if it's already contained in the original HashMap...
             List<String> daHandlingDevice = daDev.get(dev);
-
             // ... if so, then add the actual DA to the list of DAs handling this device
             if (daHandlingDevice != null)
             {
@@ -201,7 +190,6 @@ public class PAManagerService extends Service
       // Scan all connected DAs
       for (String tmpDaName : connectedDAs.keySet())
       {
-
         // Retrieve the Capabilities of the DA
         Capabilities cap = availableDAs.get(tmpDaName);
 
@@ -277,7 +265,6 @@ public class PAManagerService extends Service
         {
           // Unbind the Device Adapter
           unbindService(conn);
-
           // Remove the DA from the Maps
           connectedDAs.remove(daId);
           daConnections.remove(daId);
@@ -330,7 +317,6 @@ public class PAManagerService extends Service
       // Check whether there is exactly one DA handling the specified device
       if (daHandlingDevice != null && daHandlingDevice.size() == 1)
       {
-
         // Retrieve the Capabilities and the endpoint of that DA
         Capabilities cap = availableDAs.get(daHandlingDevice.get(0));
         IDeviceAdapter da = connectedDAs.get(daHandlingDevice.get(0));
@@ -811,7 +797,6 @@ public class PAManagerService extends Service
    */
   private final IDeviceAdapterListener.Stub daEndpoint = new IDeviceAdapterListener.Stub()
   {
-
     /**
      * Register a new device with the SDCS
      *
@@ -968,7 +953,6 @@ public class PAManagerService extends Service
   @Override
   public IBinder onBind(Intent intent)
   {
-
     // If this is the first start, do some initialization tasks
     if (firstStart)
     {
@@ -999,6 +983,8 @@ public class PAManagerService extends Service
       // Discover DAs on the system
       discoverDAs();
 
+      checkAndCreateCassandraTable();
+
       // Do not allow the repetition of this phase (though this may be redundant for bound services)
       firstStart = false;
 
@@ -1010,6 +996,11 @@ public class PAManagerService extends Service
     }
 
     return appEndpoint;
+  }
+
+  private void checkAndCreateCassandraTable()
+  {
+
   }
 
   @Override

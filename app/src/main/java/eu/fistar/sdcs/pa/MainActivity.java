@@ -1,9 +1,10 @@
 /**
- * Copyright (C) 2014 Consorzio Roma Ricerche All rights reserved This file is part of the Protocol Adapter software, available at https://github.com/theIoTLab/ProtocolAdapter .
- * The Protocol Adapter is free software: you can redistribute it and/or modify it under the terms of the GNU Lesser General Public License as published by the Free Software
- * Foundation, either version 3 of the License. This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details. You should have received a copy of the GNU General Public License
- * along with this program.  If not, see http://opensource.org/licenses/LGPL-3.0 Contact Consorzio Roma Ricerche (protocoladapter@gmail.com)
+ * Copyright (C) 2014 Consorzio Roma Ricerche All rights reserved This file is part of the Protocol Adapter software, available at
+ * https://github.com/theIoTLab/ProtocolAdapter . The Protocol Adapter is free software: you can redistribute it and/or modify it under the terms of the GNU Lesser
+ * General Public License as published by the Free Software Foundation, either version 3 of the License. This program is distributed in the hope that it will be
+ * useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ * for more details. You should have received a copy of the GNU General Public License along with this program.  If not, see http://opensource.org/licenses/LGPL-3.0
+ * Contact Consorzio Roma Ricerche (protocoladapter@gmail.com)
  */
 
 package eu.fistar.sdcs.pa;
@@ -35,6 +36,7 @@ import android.view.View;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
+import com.loopj.android.http.AsyncHttpClient;
 import eu.fistar.sdcs.pa.common.Capabilities;
 import eu.fistar.sdcs.pa.common.DeviceDescription;
 import eu.fistar.sdcs.pa.common.IProtocolAdapter;
@@ -48,6 +50,8 @@ import eu.fistar.sdcs.pa.dialogs.IPADialogListener;
 import eu.fistar.sdcs.pa.dialogs.SendCommandDialogFragment;
 import eu.fistar.sdcs.pa.dialogs.StartDaDialogFragment;
 import eu.fistar.sdcs.pa.dialogs.StopDaDialogFragment;
+import org.apache.http.entity.StringEntity;
+import org.json.JSONObject;
 
 /**
  * This is just an example activity used to bind the Protocol Adapter directly in case it's not bounded elsewhere. Remember that you can bind the Protocol Adapter from here but it
@@ -66,6 +70,7 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
 
   private Handler mHandler = null;
   private LooperThread looperThread;
+  private AsyncHttpClient m_client;
   int min = Integer.MAX_VALUE, max = 0;
   PrintWriter breathingOut = null, generalOut = null, rToROut = null, accelOut = null, heartRateOut = null, ecgRateOut = null;
   private String format = m_dateFormat.format(new Date());
@@ -110,10 +115,12 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
       pa = IProtocolAdapter.Stub.asInterface(iBinder);
       try
       {
-        looperThread = new LooperThread();
+        looperThread = new LooperThread(getApplicationContext());
         pa.registerPAListener(looperThread);
         new Thread(looperThread).start();
         // Registering listener
+
+        m_client = new AsyncHttpClient();
 
         // Start all the Device Adapters of the system
         @SuppressWarnings("unchecked")
@@ -148,6 +155,12 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
   {
     long timeOfOne, currTime;
     boolean generalHeadersFilled = false, breathingHeadersFilled = false, rToRHeadersFilled = false, accelHeadersFilled = false, heartRateHeadersFilled = false, ecgHeadersFilled = false;
+    private Context m_context;
+
+    public LooperThread(Context applicationContext)
+    {
+      m_context = applicationContext;
+    }
 
     @Override
     public void run()
@@ -168,6 +181,17 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
     {
       if (observations != null && observations.size() > 0)
       {
+        //JSONObject jsonParams = new JSONObject();
+        //timestamp = String.valueOf(calendar.getTimeInMillis());
+        //jsonParams.put("body", tempHolder.holder_desc);
+        //jsonParams.put("price", tempHolder.holder_price);
+        //jsonParams.put("location", tempHolder.holder_location);
+        //jsonParams.put("user", tempHolder.holder_name);
+        //jsonParams.put("user_id", tempHolder.user_id);
+        //jsonParams.put("image", tempHolder.holder_image);
+        //jsonParams.put("store_id", tempHolder.store_id);
+        //StringEntity entity = new StringEntity(jsonParams.toString());
+        //m_client.put(m_context, "http://localhost:8099/")
         if (observations.size() == 25) // GENERAL
         {
           if (!generalHeadersFilled)
@@ -200,7 +224,7 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
               accelHeadersFilled = true;
             }
           }
-          else if ("r to r".equals(propertyName))
+          else if ("r to r".equals(propertyName)) // R to R
           {
             if (!rToRHeadersFilled)
             {
