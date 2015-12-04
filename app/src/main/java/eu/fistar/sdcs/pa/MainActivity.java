@@ -1,17 +1,22 @@
 /**
- * Copyright (C) 2014 Consorzio Roma Ricerche All rights reserved This file is part of the Protocol Adapter software, available at
- * https://github.com/theIoTLab/ProtocolAdapter . The Protocol Adapter is free software: you can redistribute it and/or modify it under the terms of the GNU Lesser
- * General Public License as published by the Free Software Foundation, either version 3 of the License. This program is distributed in the hope that it will be
- * useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
- * for more details. You should have received a copy of the GNU General Public License along with this program.  If not, see http://opensource.org/licenses/LGPL-3.0
- * Contact Consorzio Roma Ricerche (protocoladapter@gmail.com)
+ * Copyright (C) 2014 Consorzio Roma Ricerche All rights reserved This file is part of the Protocol Adapter software, available at https://github.com/theIoTLab/ProtocolAdapter .
+ * The Protocol Adapter is free software: you can redistribute it and/or modify it under the terms of the GNU Lesser General Public License as published by the Free Software
+ * Foundation, either version 3 of the License. This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details. You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see http://opensource.org/licenses/LGPL-3.0 Contact Consorzio Roma Ricerche (protocoladapter@gmail.com)
  */
 
 package eu.fistar.sdcs.pa;
 
 import java.io.File;
 import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.InputStream;
 import java.io.PrintWriter;
+import java.security.KeyStore;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
+import java.security.cert.CertificateException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -19,11 +24,14 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
+import android.content.res.AssetManager;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
@@ -36,7 +44,6 @@ import android.view.View;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
-import com.loopj.android.http.AsyncHttpClient;
 import eu.fistar.sdcs.pa.common.Capabilities;
 import eu.fistar.sdcs.pa.common.DeviceDescription;
 import eu.fistar.sdcs.pa.common.IProtocolAdapter;
@@ -50,8 +57,7 @@ import eu.fistar.sdcs.pa.dialogs.IPADialogListener;
 import eu.fistar.sdcs.pa.dialogs.SendCommandDialogFragment;
 import eu.fistar.sdcs.pa.dialogs.StartDaDialogFragment;
 import eu.fistar.sdcs.pa.dialogs.StopDaDialogFragment;
-import org.apache.http.entity.StringEntity;
-import org.json.JSONObject;
+import eu.fistar.sdcs.pa.runnable.ClientSaveWorker;
 
 /**
  * This is just an example activity used to bind the Protocol Adapter directly in case it's not bounded elsewhere. Remember that you can bind the Protocol Adapter from here but it
@@ -62,19 +68,22 @@ import org.json.JSONObject;
  */
 public class MainActivity extends FragmentActivity implements IPADialogListener
 {
+  static
+  {
+    System.setProperty("ssl.TrustManagerFactory.algorithm", javax.net.ssl.KeyManagerFactory.getDefaultAlgorithm());
+  }
+
   private final SimpleDateFormat m_dateFormat = new SimpleDateFormat("yyyyMMddhhmm'.csv'");
   private static final String LOGTAG = "PA Activity";
-  static final int POINTS_COUNT = 1000;
-  static final int UPDATE_STEP = 250;
   private IProtocolAdapter pa;
+  protected ExecutorService m_queryThreadExecutor = Executors.newCachedThreadPool();
 
   private Handler mHandler = null;
   private LooperThread looperThread;
-  private AsyncHttpClient m_client;
-  int min = Integer.MAX_VALUE, max = 0;
-  PrintWriter breathingOut = null, generalOut = null, rToROut = null, accelOut = null, heartRateOut = null, ecgRateOut = null;
   private String format = m_dateFormat.format(new Date());
   private File externalFilesDir;
+  private KeyStore m_keystore;
+  private List<Observation> m_observations = new ArrayList<>();
 
   private ServiceConnection serv = new ServiceConnection()
   {
@@ -115,12 +124,15 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
       pa = IProtocolAdapter.Stub.asInterface(iBinder);
       try
       {
-        looperThread = new LooperThread(getApplicationContext());
+        AssetManager assetMgr = getAssets();
+        InputStream clientJksInputStream = assetMgr.open("client.bks");
+
+        m_keystore = KeyStore.getInstance("BKS");
+        m_keystore.load(clientJksInputStream, "klient1".toCharArray());
+        looperThread = new LooperThread(m_keystore);
         pa.registerPAListener(looperThread);
         new Thread(looperThread).start();
         // Registering listener
-
-        m_client = new AsyncHttpClient();
 
         // Start all the Device Adapters of the system
         @SuppressWarnings("unchecked")
@@ -136,6 +148,22 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
       catch (RemoteException e)
       {
         updateLog("Error contacting Protocol Adapter");
+      }
+      catch (IOException e)
+      {
+        e.printStackTrace();
+      }
+      catch (KeyStoreException e)
+      {
+        e.printStackTrace();
+      }
+      catch (CertificateException e)
+      {
+        e.printStackTrace();
+      }
+      catch (NoSuchAlgorithmException e)
+      {
+        e.printStackTrace();
       }
     }
 
@@ -153,13 +181,11 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
 
   class LooperThread extends IProtocolAdapterListener.Stub implements Runnable
   {
-    long timeOfOne, currTime;
-    boolean generalHeadersFilled = false, breathingHeadersFilled = false, rToRHeadersFilled = false, accelHeadersFilled = false, heartRateHeadersFilled = false, ecgHeadersFilled = false;
-    private Context m_context;
+    private KeyStore m_keystore;
 
-    public LooperThread(Context applicationContext)
+    public LooperThread(KeyStore keystore)
     {
-      m_context = applicationContext;
+      m_keystore = keystore;
     }
 
     @Override
@@ -179,117 +205,25 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
     @Override
     public void pushData(final List<Observation> observations, DeviceDescription deviceDescription) throws RemoteException
     {
-      if (observations != null && observations.size() > 0)
+      m_observations.addAll(observations);
+
+      if (m_observations != null && m_observations.size() >= 50)
       {
-        //JSONObject jsonParams = new JSONObject();
-        //timestamp = String.valueOf(calendar.getTimeInMillis());
-        //jsonParams.put("body", tempHolder.holder_desc);
-        //jsonParams.put("price", tempHolder.holder_price);
-        //jsonParams.put("location", tempHolder.holder_location);
-        //jsonParams.put("user", tempHolder.holder_name);
-        //jsonParams.put("user_id", tempHolder.user_id);
-        //jsonParams.put("image", tempHolder.holder_image);
-        //jsonParams.put("store_id", tempHolder.store_id);
-        //StringEntity entity = new StringEntity(jsonParams.toString());
-        //m_client.put(m_context, "http://localhost:8099/")
-        if (observations.size() == 25) // GENERAL
+        ZephyrProtos.ObservationsPB.Builder builder = ZephyrProtos.ObservationsPB.newBuilder();
+        for (Observation obs : observations)
         {
-          if (!generalHeadersFilled)
-          {
-            getGeneralOut().print("milis,");
-            for (Observation observation : observations)
-            {
-              getGeneralOut().print(observation.getPropertyName() + ",");
-            }
-            getGeneralOut().println();
-            generalHeadersFilled = true;
-          }
-
-          currTime = observations.get(0).getPhenomenonTime();
-          getGeneralOut().print(currTime + ",");
-          for (Observation observation : observations)
-          {
-            getGeneralOut().print(observation.getValues().get(0) + ",");
-          }
-          getGeneralOut().println();
+          builder.addObservations(
+              ZephyrProtos.ObservationPB.newBuilder()
+                  .setName(obs.getPropertyName())
+                  .setUnit(obs.getMeasurementUnit())
+                  .setTime(obs.getPhenomenonTime())
+                  .setDuration((int)obs.getDuration())
+                  .addAllValues(obs.getValues())
+          );
         }
-        else
-        {
-          String propertyName = observations.get(0).getPropertyName();
-          if (propertyName.startsWith("accelerometer")) // acc
-          {
-            if (!accelHeadersFilled)
-            {
-              getAccelOut().println("milis,breathing");
-              accelHeadersFilled = true;
-            }
-          }
-          else if ("r to r".equals(propertyName)) // R to R
-          {
-            if (!rToRHeadersFilled)
-            {
-              getrToROut().println("milis,rToRMillis");
-              rToRHeadersFilled = true;
-            }
-
-            for (Observation observation : observations)
-            {
-              timeOfOne = observation.getDuration() / observation.getValues().size();
-              currTime = observation.getPhenomenonTime();
-              for (String value : observation.getValues())
-              {
-                currTime += timeOfOne;
-                getrToROut().println(currTime + "," + value);
-              }
-            }
-          }
-          else if ("heart rate".equals(propertyName))
-          {
-            if (!heartRateHeadersFilled)
-            {
-              getHeartRateOut().println("milis,breathing");
-              heartRateHeadersFilled = true;
-            }
-          }
-          else if ("ecg".equals(propertyName))
-          {
-            if (!ecgHeadersFilled)
-            {
-              getEcgRateOut().println("milis,mV");
-              ecgHeadersFilled = true;
-            }
-
-            for (Observation observation : observations)
-            {
-              timeOfOne = observation.getDuration() / observation.getValues().size();
-              currTime = observation.getPhenomenonTime();
-              for (String value : observation.getValues())
-              {
-                currTime += timeOfOne;
-                getEcgRateOut().println(currTime + "," + value);
-              }
-            }
-          }
-          else if ("breathing".equals(propertyName))
-          {
-            if (!breathingHeadersFilled)
-            {
-              getBreathingOut().println("milis,breathing");
-              breathingHeadersFilled = true;
-            }
-
-            for (Observation observation : observations)
-            {
-              timeOfOne = observation.getDuration() / observation.getValues().size();
-              currTime = observation.getPhenomenonTime();
-              for (String value : observation.getValues())
-              {
-                currTime += timeOfOne;
-                getBreathingOut().println(currTime + "," + value);
-              }
-            }
-          }
-        }
+        ZephyrProtos.ObservationsPB observationsPB = builder.build();
+        m_queryThreadExecutor.execute(new ClientSaveWorker(observationsPB, m_keystore));
+        m_observations.clear();
       }
     }
 
@@ -309,30 +243,6 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
     public void deviceDisconnected(DeviceDescription deviceDescription) throws RemoteException
     {
       this.updateLog("Device disconnected: " + deviceDescription.getDeviceID());
-      if (getBreathingOut() != null)
-      {
-        getBreathingOut().close();
-      }
-      if (getGeneralOut() != null)
-      {
-        getGeneralOut().close();
-      }
-      if (getrToROut() != null)
-      {
-        getrToROut().close();
-      }
-      if (getAccelOut() != null)
-      {
-        getAccelOut().close();
-      }
-      if (getHeartRateOut() != null)
-      {
-        getHeartRateOut().close();
-      }
-      if (getEcgRateOut() != null)
-      {
-        getEcgRateOut().close();
-      }
     }
 
     @Override
@@ -373,60 +283,6 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
         }
       }, 100L);
     }
-  }
-
-  private PrintWriter getHeartRateOut()
-  {
-    if (heartRateOut == null)
-    {
-      heartRateOut = managePrintWriter(heartRateOut, "heartRate", true);
-    }
-    return heartRateOut;
-  }
-
-  private PrintWriter getAccelOut()
-  {
-    if (accelOut == null)
-    {
-      accelOut = managePrintWriter(accelOut, "acc", true);
-    }
-    return accelOut;
-  }
-
-  private PrintWriter getrToROut()
-  {
-    if (rToROut == null)
-    {
-      rToROut = managePrintWriter(rToROut, "rtor", true);
-    }
-    return rToROut;
-  }
-
-  private PrintWriter getGeneralOut()
-  {
-    if (generalOut == null)
-    {
-      generalOut = managePrintWriter(generalOut, "general", true);
-    }
-    return generalOut;
-  }
-
-  private PrintWriter getBreathingOut()
-  {
-    if (breathingOut == null)
-    {
-      breathingOut = managePrintWriter(breathingOut, "breathing", true);
-    }
-    return breathingOut;
-  }
-
-  private PrintWriter getEcgRateOut()
-  {
-    if (ecgRateOut == null)
-    {
-      ecgRateOut = managePrintWriter(ecgRateOut, "ecg", true);
-    }
-    return ecgRateOut;
   }
 
   @Override
@@ -491,10 +347,10 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
       // Connect to the specified device
       updateLog("Connecting to device: " + devId);
       pa.forceConnectDev(devId, daId);
-      //sendCommand("enableAccelerometerData", "", devId);
-      //sendCommand("enableBreathingData", "", devId);
-      //sendCommand("enableRtoRData", "", devId);
-      //sendCommand("enableGeneralData", "", devId);
+      sendCommand("enableAccelerometerData", "", devId);
+      sendCommand("enableBreathingData", "", devId);
+      sendCommand("enableRtoRData", "", devId);
+      sendCommand("enableGeneralData", "", devId);
     }
     catch (RemoteException e)
     {
@@ -523,34 +379,6 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
     try
     {
       pa.execCommand(command, parameter != null ? parameter : "", devId);
-      boolean enable = command.startsWith("enable");
-      if (!enable)
-      {
-        if (command.endsWith("GeneralData"))
-        {
-          generalOut = managePrintWriter(generalOut, "general", enable);
-        }
-        else if (command.endsWith("AccelerometerData"))
-        {
-          accelOut = managePrintWriter(accelOut, "acc", enable);
-        }
-        else if (command.endsWith("BreathingData"))
-        {
-          breathingOut = managePrintWriter(breathingOut, "breathing", enable);
-        }
-        else if (command.endsWith("EcgData"))
-        {
-          ecgRateOut = managePrintWriter(ecgRateOut, "ecg", enable);
-        }
-        else if (command.endsWith("HeartRateData"))
-        {
-          heartRateOut = managePrintWriter(heartRateOut, "heartRate", enable);
-        }
-        else if (command.endsWith("RtoRData"))
-        {
-          rToROut = managePrintWriter(rToROut, "rtor", enable);
-        }
-      }
     }
     catch (RemoteException e)
     {

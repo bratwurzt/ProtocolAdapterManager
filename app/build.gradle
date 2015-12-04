@@ -1,4 +1,5 @@
 apply plugin: 'com.android.application'
+apply plugin: 'com.google.protobuf'
 
 android {
     compileSdkVersion 21
@@ -6,8 +7,8 @@ android {
 
     defaultConfig {
         applicationId "eu.fistar.sdcs.pa"
-        minSdkVersion 15
-        targetSdkVersion 17
+        minSdkVersion 19
+        targetSdkVersion 19
         versionCode 6
         versionName "3.4.1"
     }
@@ -29,8 +30,8 @@ repositories {
 dependencies {
     compile fileTree(dir: 'libs', include: ['*.jar'])
     compile 'com.android.support:appcompat-v7:21.0.2'
-    compile 'com.loopj.android:android-async-http:1.4.9'
-    compile 'org.json:json:20151123'
+    compile 'com.google.protobuf:protobuf-java:2.6.1'
+
     // This is the entry that adds the dependency from the AAR library
     compile 'eu.fistar.sdcs.pa.common:protocol-adapter-lib:3.4.4@aar'
 }
