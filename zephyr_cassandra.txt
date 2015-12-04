@@ -1,0 +1,17 @@
+CREATE KEYSPACE counterkeyspace
+WITH REPLICATION = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 };
+
+CREATE TABLE counter_timeline(
+	counter_id text,
+	timestamp bigint,
+	avg_sec_gap float,
+	speed int,
+	cars_per_sec int,
+	utilization float,
+	PRIMARY KEY(counter_id, timestamp)
+)
+WITH CLUSTERING ORDER BY (timestamp DESC);
+
+INSERT INTO counter_timelinecounter_id, timestamp, avg_sec_gap, speed, cars_per_sec, utilization)
+  VALUES ()
+  USING TTL 86400;
