@@ -4,10 +4,10 @@
     <string name="app_name">Protocol Adapter</string>
     <string name="btn_send_command">Send Command</string>
     <string name="btn_connect_devices">Connect</string>
-    <string name="btn_stop_pa">Stop Protocol Adapter</string>
-    <string name="btn_start_pa">Start Protocol Adapter</string>
-    <string name="btn_start_da">Start Device Adapter</string>
-    <string name="btn_stop_da">Stop Device Adapter</string>
+    <string name="btn_stop_pa">Stop PA</string>
+    <string name="btn_start_pa">Start PA</string>
+    <string name="btn_start_da">Start DA</string>
+    <string name="btn_stop_da">Stop DA</string>
     <string name="lbl_title">Start the service directly if it\'s not started elsewhere</string>
     <string name="lbl_feedback_unknown">Protocol Adapter in unknown status</string>
     <string name="lbl_feedback_started">Protocol Adapter started!</string>

@@ -1,18 +1,20 @@
 /**
- * Copyright (C) 2014 Consorzio Roma Ricerche All rights reserved This file is part of the Protocol Adapter software, available at https://github.com/theIoTLab/ProtocolAdapter .
- * The Protocol Adapter is free software: you can redistribute it and/or modify it under the terms of the GNU Lesser General Public License as published by the Free Software
- * Foundation, either version 3 of the License. This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details. You should have received a copy of the GNU General Public License
- * along with this program.  If not, see http://opensource.org/licenses/LGPL-3.0 Contact Consorzio Roma Ricerche (protocoladapter@gmail.com)
+ * Copyright (C) 2014 Consorzio Roma Ricerche All rights reserved This file is part of the Protocol Adapter software, available at
+ * https://github.com/theIoTLab/ProtocolAdapter . The Protocol Adapter is free software: you can redistribute it and/or modify it under the terms of the GNU Lesser
+ * General Public License as published by the Free Software Foundation, either version 3 of the License. This program is distributed in the hope that it will be
+ * useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ * for more details. You should have received a copy of the GNU General Public License along with this program.  If not, see http://opensource.org/licenses/LGPL-3.0
+ * Contact Consorzio Roma Ricerche (protocoladapter@gmail.com)
  */
 
 package eu.fistar.sdcs.pa;
 
 import java.io.File;
-import java.io.FileNotFoundException;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.PrintWriter;
 import java.security.KeyStore;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
@@ -32,11 +34,13 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
 import android.content.res.AssetManager;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
 import android.os.Bundle;
-import android.os.Environment;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.os.RemoteException;
 import android.support.v4.app.FragmentActivity;
 import android.util.Log;
@@ -57,7 +61,8 @@ import eu.fistar.sdcs.pa.dialogs.IPADialogListener;
 import eu.fistar.sdcs.pa.dialogs.SendCommandDialogFragment;
 import eu.fistar.sdcs.pa.dialogs.StartDaDialogFragment;
 import eu.fistar.sdcs.pa.dialogs.StopDaDialogFragment;
-import eu.fistar.sdcs.pa.runnable.ClientSaveWorker;
+import eu.fistar.sdcs.pa.runnable.LocalClientSaveWorker;
+import eu.fistar.sdcs.pa.runnable.RemoteClientSaveWorker;
 
 /**
  * This is just an example activity used to bind the Protocol Adapter directly in case it's not bounded elsewhere. Remember that you can bind the Protocol Adapter from here but it
@@ -76,13 +81,15 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
   private final SimpleDateFormat m_dateFormat = new SimpleDateFormat("yyyyMMddhhmm'.csv'");
   private static final String LOGTAG = "PA Activity";
   private IProtocolAdapter pa;
-  protected ExecutorService m_queryThreadExecutor = Executors.newCachedThreadPool();
+  protected ExecutorService m_queryThreadExecutor = Executors.newSingleThreadExecutor();
 
   private Handler mHandler = null;
   private LooperThread looperThread;
   private String format = m_dateFormat.format(new Date());
-  private File externalFilesDir;
+  private File m_observationsFile;
   private KeyStore m_keystore;
+  private File m_observationLocalFile;
+  private PowerManager.WakeLock m_wakeLock;
   private List<Observation> m_observations = new ArrayList<>();
 
   private ServiceConnection serv = new ServiceConnection()
@@ -205,26 +212,106 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
     @Override
     public void pushData(final List<Observation> observations, DeviceDescription deviceDescription) throws RemoteException
     {
-      m_observations.addAll(observations);
+      for (Observation obs : observations)
+      {
+        if ("respiration rate".equals(obs.getPropertyName())
+                || "r to r".equals(obs.getPropertyName())
+                || "vmu".equals(obs.getPropertyName())
+                || "breathing wave amplitude".equals(obs.getPropertyName())
+                || "heart rate".equals(obs.getPropertyName())
+                || "peak acceleration".equals(obs.getPropertyName())
+                || "posture".equals(obs.getPropertyName())
+                || "ecg".equals(obs.getPropertyName())
+                || "ecg amplitude".equals(obs.getPropertyName()))
+        {
+          m_observations.add(obs);
+        }
+      }
 
       if (m_observations != null && m_observations.size() >= 50)
       {
-        ZephyrProtos.ObservationsPB.Builder builder = ZephyrProtos.ObservationsPB.newBuilder();
-        for (Observation obs : observations)
-        {
-          builder.addObservations(
-              ZephyrProtos.ObservationPB.newBuilder()
-                  .setName(obs.getPropertyName())
-                  .setUnit(obs.getMeasurementUnit())
-                  .setTime(obs.getPhenomenonTime())
-                  .setDuration((int)obs.getDuration())
-                  .addAllValues(obs.getValues())
-          );
-        }
-        ZephyrProtos.ObservationsPB observationsPB = builder.build();
-        m_queryThreadExecutor.execute(new ClientSaveWorker(observationsPB, m_keystore));
+        saveData();
         m_observations.clear();
       }
+    }
+
+    private void saveData()
+    {
+      ZephyrProtos.ObservationsPB.Builder builder = ZephyrProtos.ObservationsPB.newBuilder();
+      for (Observation obs : m_observations)
+      {
+        builder.addObservations(
+            ZephyrProtos.ObservationPB.newBuilder()
+                .setName(obs.getPropertyName())
+                .setUnit(obs.getMeasurementUnit())
+                .setTime(obs.getPhenomenonTime())
+                .setDuration((int)obs.getDuration())
+                .addAllValues(obs.getValues())
+        );
+      }
+      try
+      {
+        ConnectivityManager connManager = (ConnectivityManager)getSystemService(Context.CONNECTIVITY_SERVICE);
+        NetworkInfo activeNetInfo = connManager.getActiveNetworkInfo();
+        if ("WIFI".equals(activeNetInfo.getTypeName()))
+        {
+          ZephyrProtos.ObservationsPB obss = getFileObservations(m_observationsFile);
+          if (obss != null && obss.getObservationsCount() > 0)
+          {
+            builder.addAllObservations(obss.getObservationsList());
+            emptyObservationFile();
+          }
+          ZephyrProtos.ObservationsPB observationsPB = builder.build();
+          m_queryThreadExecutor.execute(new RemoteClientSaveWorker(observationsPB, m_keystore));
+        }
+        else
+        {
+          ZephyrProtos.ObservationsPB observationsPB = builder.build();
+          m_queryThreadExecutor.execute(new LocalClientSaveWorker(m_observationsFile, observationsPB));
+        }
+      }
+      catch (IOException e)
+      {
+        e.printStackTrace();
+      }
+    }
+
+    private void emptyObservationFile()
+    {
+      String string1 = "";
+      FileOutputStream fos;
+      try
+      {
+        fos = new FileOutputStream(m_observationsFile, false);
+        FileWriter fWriter;
+
+        try
+        {
+          fWriter = new FileWriter(fos.getFD());
+
+          fWriter.write(string1);
+          fWriter.flush();
+          fWriter.close();
+        }
+        catch (Exception e)
+        {
+          e.printStackTrace();
+        }
+        finally
+        {
+          fos.getFD().sync();
+          fos.close();
+        }
+      }
+      catch (Exception e)
+      {
+        e.printStackTrace();
+      }
+    }
+
+    private ZephyrProtos.ObservationsPB getFileObservations(File observationsFile) throws IOException
+    {
+      return ZephyrProtos.ObservationsPB.parseDelimitedFrom(new FileInputStream(observationsFile));
     }
 
     @Override
@@ -290,7 +377,9 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
   {
     super.onCreate(savedInstanceState);
     setContentView(R.layout.activity_main);
-    externalFilesDir = getExternalFilesDir(Environment.DIRECTORY_NOTIFICATIONS);
+    m_observationsFile = new File(getFilesDir(), "observations.dat");
+    PowerManager m_pwrManager = (PowerManager)getSystemService(Context.POWER_SERVICE);
+    m_wakeLock = m_pwrManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MyWakeLock");
   }
 
   public void startService(View v)
@@ -356,6 +445,10 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
     {
       updateLog("Error communicating wih the PA");
     }
+    finally
+    {
+      m_wakeLock.acquire();
+    }
   }
 
   @Override
@@ -366,10 +459,15 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
       // Disconnect from the specified device
       updateLog("Disconnecting from device: " + devId);
       pa.disconnectDev(devId);
+
     }
     catch (RemoteException e)
     {
       updateLog("Error communicating wih the PA");
+    }
+    finally
+    {
+      m_wakeLock.release();
     }
   }
 
@@ -384,27 +482,6 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
     {
       updateLog("Error executing command");
     }
-  }
-
-  private PrintWriter managePrintWriter(PrintWriter pOut, String logName, boolean enable)
-  {
-    try
-    {
-      if (enable)
-      {
-        pOut = new PrintWriter(new File(externalFilesDir, "zephyr_" + logName + format));
-      }
-      else if (pOut != null)
-      {
-        pOut.close();
-      }
-      return pOut;
-    }
-    catch (FileNotFoundException e)
-    {
-      e.printStackTrace();
-    }
-    return pOut;
   }
 
   @Override
