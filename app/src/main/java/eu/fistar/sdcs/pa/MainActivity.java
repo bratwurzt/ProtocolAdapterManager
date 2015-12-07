@@ -65,8 +65,8 @@ import eu.fistar.sdcs.pa.runnable.LocalClientSaveWorker;
 import eu.fistar.sdcs.pa.runnable.RemoteClientSaveWorker;
 
 /**
- * This is just an example activity used to bind the Protocol Adapter directly in case it's not bounded elsewhere. Remember that you can bind the Protocol Adapter from here but it
- * should be directly bounded by the software that uses it e.g. by the Sensor Data Collection Service SE.
+ * This is just an example activity used to bind the Protocol Adapter directly in case it's not bounded elsewhere. Remember that you can bind the Protocol Adapter
+ * from here but it should be directly bounded by the software that uses it e.g. by the Sensor Data Collection Service SE.
  *
  * @author Marcello Morena
  * @author Alexandru Serbanati
@@ -133,9 +133,9 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
       {
         AssetManager assetMgr = getAssets();
         InputStream clientJksInputStream = assetMgr.open("client.bks");
-
         m_keystore = KeyStore.getInstance("BKS");
         m_keystore.load(clientJksInputStream, "klient1".toCharArray());
+
         looperThread = new LooperThread(m_keystore);
         pa.registerPAListener(looperThread);
         new Thread(looperThread).start();
@@ -212,17 +212,28 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
     @Override
     public void pushData(final List<Observation> observations, DeviceDescription deviceDescription) throws RemoteException
     {
+      //m_observations.addAll(observations);
       for (Observation obs : observations)
       {
-        if ("respiration rate".equals(obs.getPropertyName())
-                || "r to r".equals(obs.getPropertyName())
-                || "vmu".equals(obs.getPropertyName())
-                || "breathing wave amplitude".equals(obs.getPropertyName())
-                || "heart rate".equals(obs.getPropertyName())
-                || "peak acceleration".equals(obs.getPropertyName())
-                || "posture".equals(obs.getPropertyName())
-                || "ecg".equals(obs.getPropertyName())
-                || "ecg amplitude".equals(obs.getPropertyName()))
+        String propertyName = obs.getPropertyName();
+        if ("respiration rate".equals(propertyName)
+            || "y-axis accelerometer".equals(propertyName)
+            || "y-axis acceleration peak".equals(propertyName)
+            || "x-axis accelerometer".equals(propertyName)
+            || "x-axis acceleration peak".equals(propertyName)
+            || "z-axis accelerometer".equals(propertyName)
+            || "z-axis acceleration peak".equals(propertyName)
+            || "accelerometer x".equals(propertyName)
+            || "accelerometer y".equals(propertyName)
+            || "accelerometer z".equals(propertyName)
+            || "r to r".equals(propertyName)
+            || "vmu".equals(propertyName)
+            || "breathing wave amplitude".equals(propertyName)
+            || "heart rate".equals(propertyName)
+            || "peak acceleration".equals(propertyName)
+            || "posture".equals(propertyName)
+            || "ecg".equals(propertyName)
+            || "ecg amplitude".equals(propertyName))
         {
           m_observations.add(obs);
         }
@@ -238,17 +249,17 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
     private void saveData()
     {
       ZephyrProtos.ObservationsPB.Builder builder = ZephyrProtos.ObservationsPB.newBuilder();
-      for (Observation obs : m_observations)
-      {
-        builder.addObservations(
-            ZephyrProtos.ObservationPB.newBuilder()
-                .setName(obs.getPropertyName())
-                .setUnit(obs.getMeasurementUnit())
-                .setTime(obs.getPhenomenonTime())
-                .setDuration((int)obs.getDuration())
-                .addAllValues(obs.getValues())
-        );
-      }
+        for (Observation obs : m_observations)
+        {
+          builder.addObservations(
+              ZephyrProtos.ObservationPB.newBuilder()
+                  .setName(obs.getPropertyName())
+                  .setUnit(obs.getMeasurementUnit())
+                  .setTime(obs.getPhenomenonTime())
+                  .setDuration((int)obs.getDuration())
+                  .addAllValues(obs.getValues())
+          );
+        }
       try
       {
         ConnectivityManager connManager = (ConnectivityManager)getSystemService(Context.CONNECTIVITY_SERVICE);
@@ -436,10 +447,10 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
       // Connect to the specified device
       updateLog("Connecting to device: " + devId);
       pa.forceConnectDev(devId, daId);
-      sendCommand("enableAccelerometerData", "", devId);
-      sendCommand("enableBreathingData", "", devId);
-      sendCommand("enableRtoRData", "", devId);
-      sendCommand("enableGeneralData", "", devId);
+      //sendCommand("enableAccelerometerData", "", devId);
+      //sendCommand("enableBreathingData", "", devId);
+      //sendCommand("enableRtoRData", "", devId);
+      //sendCommand("enableGeneralData", "", devId);
     }
     catch (RemoteException e)
     {
@@ -459,7 +470,6 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
       // Disconnect from the specified device
       updateLog("Disconnecting from device: " + devId);
       pa.disconnectDev(devId);
-
     }
     catch (RemoteException e)
     {
