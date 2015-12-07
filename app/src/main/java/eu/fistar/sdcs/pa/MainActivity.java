@@ -15,6 +15,7 @@ import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.Socket;
 import java.security.KeyStore;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
@@ -36,6 +37,7 @@ import android.content.ServiceConnection;
 import android.content.res.AssetManager;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
+import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
@@ -81,12 +83,14 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
   private final SimpleDateFormat m_dateFormat = new SimpleDateFormat("yyyyMMddhhmm'.csv'");
   private static final String LOGTAG = "PA Activity";
   private IProtocolAdapter pa;
+  final Object LOCK = new Object();
   protected ExecutorService m_queryThreadExecutor = Executors.newSingleThreadExecutor();
 
   private Handler mHandler = null;
   private LooperThread looperThread;
   private String format = m_dateFormat.format(new Date());
   private File m_observationsFile;
+  private ConnectivityManager m_connManager;
   private KeyStore m_keystore;
   private File m_observationLocalFile;
   private PowerManager.WakeLock m_wakeLock;
@@ -188,7 +192,8 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
 
   class LooperThread extends IProtocolAdapterListener.Stub implements Runnable
   {
-    private KeyStore m_keystore;
+    //private KeyStore m_keystore;
+    private Socket m_socket;
 
     public LooperThread(KeyStore keystore)
     {
@@ -249,21 +254,20 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
     private void saveData()
     {
       ZephyrProtos.ObservationsPB.Builder builder = ZephyrProtos.ObservationsPB.newBuilder();
-        for (Observation obs : m_observations)
-        {
-          builder.addObservations(
-              ZephyrProtos.ObservationPB.newBuilder()
-                  .setName(obs.getPropertyName())
-                  .setUnit(obs.getMeasurementUnit())
-                  .setTime(obs.getPhenomenonTime())
-                  .setDuration((int)obs.getDuration())
-                  .addAllValues(obs.getValues())
-          );
-        }
+      for (Observation obs : m_observations)
+      {
+        builder.addObservations(
+            ZephyrProtos.ObservationPB.newBuilder()
+                .setName(obs.getPropertyName())
+                .setUnit(obs.getMeasurementUnit())
+                .setTime(obs.getPhenomenonTime())
+                .setDuration((int)obs.getDuration())
+                .addAllValues(obs.getValues())
+        );
+      }
       try
       {
-        ConnectivityManager connManager = (ConnectivityManager)getSystemService(Context.CONNECTIVITY_SERVICE);
-        NetworkInfo activeNetInfo = connManager.getActiveNetworkInfo();
+        NetworkInfo activeNetInfo = m_connManager.getActiveNetworkInfo();
         if ("WIFI".equals(activeNetInfo.getTypeName()))
         {
           ZephyrProtos.ObservationsPB obss = getFileObservations(m_observationsFile);
@@ -273,7 +277,7 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
             emptyObservationFile();
           }
           ZephyrProtos.ObservationsPB observationsPB = builder.build();
-          m_queryThreadExecutor.execute(new RemoteClientSaveWorker(observationsPB, m_keystore));
+          m_queryThreadExecutor.execute(new RemoteClientSaveWorker(observationsPB, m_socket));
         }
         else
         {
@@ -389,6 +393,7 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
     super.onCreate(savedInstanceState);
     setContentView(R.layout.activity_main);
     m_observationsFile = new File(getFilesDir(), "observations.dat");
+    m_connManager = (ConnectivityManager)getSystemService(Context.CONNECTIVITY_SERVICE);
     PowerManager m_pwrManager = (PowerManager)getSystemService(Context.POWER_SERVICE);
     m_wakeLock = m_pwrManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MyWakeLock");
   }
@@ -440,17 +445,22 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
   }
 
   @Override
-  public void connectDev(String devId, String daId)
+  public void connectDev(final String devId, String daId)
   {
     try
     {
       // Connect to the specified device
       updateLog("Connecting to device: " + devId);
       pa.forceConnectDev(devId, daId);
-      //sendCommand("enableAccelerometerData", "", devId);
-      //sendCommand("enableBreathingData", "", devId);
-      //sendCommand("enableRtoRData", "", devId);
-      //sendCommand("enableGeneralData", "", devId);
+      final AsyncTaskRunner runner = new AsyncTaskRunner();
+      mHandler.postDelayed(new Runnable()
+      {
+        @Override
+        public void run()
+        {
+          runner.execute(devId);
+        }
+      }, 1000 * 3);
     }
     catch (RemoteException e)
     {
@@ -458,7 +468,13 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
     }
     finally
     {
-      m_wakeLock.acquire();
+      synchronized (LOCK)
+      {
+        if (!m_wakeLock.isHeld())
+        {
+          m_wakeLock.acquire();
+        }
+      }
     }
   }
 
@@ -477,7 +493,13 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
     }
     finally
     {
-      m_wakeLock.release();
+      synchronized (LOCK)
+      {
+        if (m_wakeLock.isHeld())
+        {
+          m_wakeLock.release();
+        }
+      }
     }
   }
 
@@ -712,5 +734,22 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
         sv.fullScroll(ScrollView.FOCUS_DOWN);
       }
     }, 100L);
+  }
+
+  private class AsyncTaskRunner extends AsyncTask<String, String, Void>
+  {
+    public AsyncTaskRunner()
+    {
+    }
+
+    @Override
+    protected Void doInBackground(String... strings)
+    {
+      sendCommand("enableAccelerometerData", "", strings[0]);
+      //sendCommand("enableBreathingData", "", strings[0]);
+      sendCommand("enableRtoRData", "", strings[0]);
+      sendCommand("enableGeneralData", "", strings[0]);
+      return null;
+    }
   }
 }

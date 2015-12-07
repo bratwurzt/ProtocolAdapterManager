@@ -2,6 +2,8 @@ package eu.fistar.sdcs.pa.runnable;
 
 import java.io.OutputStream;
 
+import android.annotation.TargetApi;
+import android.os.Build;
 import eu.fistar.sdcs.pa.ZephyrProtos;
 
 /**
@@ -10,6 +12,7 @@ import eu.fistar.sdcs.pa.ZephyrProtos;
 public abstract class ClientWorker implements Runnable
 {
   protected ZephyrProtos.ObservationsPB m_observations;
+  protected OutputStream m_outputStream;
 
   public ClientWorker(ZephyrProtos.ObservationsPB observations)
   {
@@ -18,6 +21,7 @@ public abstract class ClientWorker implements Runnable
 
   abstract OutputStream getOutputStream() throws Exception;
 
+  @TargetApi(Build.VERSION_CODES.KITKAT)
   @Override
   public void run()
   {
@@ -33,7 +37,7 @@ public abstract class ClientWorker implements Runnable
       }
       finally
       {
-        close();
+        getOutputStream().close();
       }
     }
     catch (Exception e)
@@ -44,5 +48,5 @@ public abstract class ClientWorker implements Runnable
 
   protected abstract void write(OutputStream outputStream) throws Exception;
 
-  protected abstract void close() throws Exception;
+  public abstract void close() throws Exception;
 }

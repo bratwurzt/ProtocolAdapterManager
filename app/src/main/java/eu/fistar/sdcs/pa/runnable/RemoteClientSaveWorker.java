@@ -4,47 +4,41 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
+import java.net.Socket;
 import java.security.KeyManagementException;
-import java.security.KeyStore;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
-import java.security.SecureRandom;
 import java.security.UnrecoverableKeyException;
 import java.security.cert.CertificateException;
 import java.util.Enumeration;
-
-import javax.net.ssl.KeyManagerFactory;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLSocket;
-import javax.net.ssl.SSLSocketFactory;
-import javax.net.ssl.TrustManager;
-import javax.net.ssl.TrustManagerFactory;
+import javax.net.SocketFactory;
 
 import eu.fistar.sdcs.pa.ZephyrProtos;
+import eu.fistar.sdcs.pa.helper.XORShiftRandom;
 
 /**
  * @author bratwurzt
  */
 public class RemoteClientSaveWorker extends ClientWorker
 {
-  private KeyStore m_keystore;
-  private SSLSocket m_socket;
+  private Socket m_socket;
 
-  public RemoteClientSaveWorker(ZephyrProtos.ObservationsPB observations, KeyStore keystore)
+  public RemoteClientSaveWorker(ZephyrProtos.ObservationsPB observations, Socket socket)
   {
     super(observations);
-    m_keystore = keystore;
+    m_socket = socket;
   }
 
   @Override
   public OutputStream getOutputStream()
       throws CertificateException, UnrecoverableKeyException, NoSuchAlgorithmException, KeyStoreException, KeyManagementException, IOException
   {
-    if (m_socket == null || !m_socket.isConnected())
+    if (m_outputStream == null)
     {
-      m_socket = createSslSocket(m_keystore, 8099);
+      checkSocket();
+      m_outputStream = m_socket.getOutputStream();
     }
-    return m_socket.getOutputStream();
+    return m_outputStream;
   }
 
   @Override
@@ -54,28 +48,29 @@ public class RemoteClientSaveWorker extends ClientWorker
   }
 
   @Override
-  protected void close() throws IOException
+  public void close() throws IOException
   {
-    m_socket.close();
   }
 
-  protected SSLSocket createSslSocket(KeyStore keystore, int serverPort)
-      throws NoSuchAlgorithmException, KeyStoreException, IOException, CertificateException, UnrecoverableKeyException, KeyManagementException
+  private void checkSocket()
   {
-    TrustManagerFactory trustManagerFactory = TrustManagerFactory.getInstance("PKIX");
-    trustManagerFactory.init(keystore);
-    TrustManager[] trustManagers = trustManagerFactory.getTrustManagers();
-    KeyManagerFactory kmf = KeyManagerFactory.getInstance("PKIX");
-    kmf.init(keystore, "klient1".toCharArray());
-    SSLContext sc = SSLContext.getInstance("TLS");
-    sc.init(kmf.getKeyManagers(), trustManagers, new SecureRandom());
-    SSLSocketFactory socketFactory = sc.getSocketFactory();
-    return getSslSocket(serverPort, socketFactory);
+    if (m_socket == null || !m_socket.isConnected() || m_socket.isClosed())
+    {
+      try
+      {
+        m_socket = createSocket(8100);
+      }
+      catch (IOException e)
+      {
+        e.printStackTrace();
+      }
+    }
   }
 
-  private SSLSocket getSslSocket(int serverPort, SSLSocketFactory socketFactory) throws IOException
+  private Socket createSocket(int serverPort) throws IOException
   {
-    int localPort = 49152;
+    XORShiftRandom xorShiftRandom = new XORShiftRandom();
+    int localPort = xorShiftRandom.nextInt(49152, 55535);
     Enumeration e = NetworkInterface.getNetworkInterfaces();
     InetAddress localInetAddress = InetAddress.getByName("localhost");
     outerLoop:
@@ -94,6 +89,6 @@ public class RemoteClientSaveWorker extends ClientWorker
         }
       }
     }
-    return (SSLSocket)socketFactory.createSocket(InetAddress.getByName("188.230.143.188"), serverPort, localInetAddress, localPort);
+    return SocketFactory.getDefault().createSocket(InetAddress.getByName("188.230.143.188"), serverPort, localInetAddress, localPort);
   }
 }
