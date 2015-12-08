@@ -29,6 +29,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.regex.Pattern;
 
 import android.content.ComponentName;
 import android.content.Context;
@@ -39,14 +40,18 @@ import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.os.AsyncTask;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.PowerManager;
 import android.os.RemoteException;
 import android.support.v4.app.FragmentActivity;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.util.Log;
 import android.view.View;
+import android.widget.EditText;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -79,7 +84,8 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
   {
     System.setProperty("ssl.TrustManagerFactory.algorithm", javax.net.ssl.KeyManagerFactory.getDefaultAlgorithm());
   }
-
+  private static final Pattern PARTIAl_IP_ADDRESS =
+        Pattern.compile("^((25[0-5]|2[0-4][0-9]|[0-1][0-9]{2}|[1-9][0-9]|[0-9])\\.){0,3}((25[0-5]|2[0-4][0-9]|[0-1][0-9]{2}|[1-9][0-9]|[0-9])){0,1}$");
   private final SimpleDateFormat m_dateFormat = new SimpleDateFormat("yyyyMMddhhmm'.csv'");
   private static final String LOGTAG = "PA Activity";
   private IProtocolAdapter pa;
@@ -95,6 +101,7 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
   private File m_observationLocalFile;
   private PowerManager.WakeLock m_wakeLock;
   private List<Observation> m_observations = new ArrayList<>();
+  private EditText m_ipAddressEditText, m_portEditText;
 
   private ServiceConnection serv = new ServiceConnection()
   {
@@ -211,7 +218,7 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
     @Override
     public void registerDevice(DeviceDescription deviceDescription, String daId) throws RemoteException
     {
-      this.updateLog("Device registered " + deviceDescription.getDeviceID() + ", handled by Device Adapter " + daId);
+      updateLog("Device registered " + deviceDescription.getDeviceID() + ", handled by Device Adapter " + daId);
     }
 
     @Override
@@ -276,8 +283,10 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
             builder.addAllObservations(obss.getObservationsList());
             emptyObservationFile();
           }
+          String ipAddress = m_ipAddressEditText.getText().toString();
+          Integer port = Integer.parseInt(m_portEditText.getText().toString());
           ZephyrProtos.ObservationsPB observationsPB = builder.build();
-          m_queryThreadExecutor.execute(new RemoteClientSaveWorker(observationsPB, m_socket));
+          m_queryThreadExecutor.execute(new RemoteClientSaveWorker(observationsPB, m_socket, ipAddress, port));
         }
         else
         {
@@ -326,76 +335,90 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
 
     private ZephyrProtos.ObservationsPB getFileObservations(File observationsFile) throws IOException
     {
+      if (!observationsFile.exists())
+      {
+        return null;
+      }
       return ZephyrProtos.ObservationsPB.parseDelimitedFrom(new FileInputStream(observationsFile));
     }
 
     @Override
     public void deregisterDevice(DeviceDescription deviceDescription) throws RemoteException
     {
-      this.updateLog("Device deregistered " + deviceDescription.getDeviceID());
+      updateLog("Device deregistered " + deviceDescription.getDeviceID());
     }
 
     @Override
     public void registerDeviceProperties(DeviceDescription deviceDescription) throws RemoteException
     {
-      this.updateLog("Device properties registered: " + deviceDescription.getDeviceID());
+      updateLog("Device properties registered: " + deviceDescription.getDeviceID());
     }
 
     @Override
     public void deviceDisconnected(DeviceDescription deviceDescription) throws RemoteException
     {
-      this.updateLog("Device disconnected: " + deviceDescription.getDeviceID());
+      updateLog("Device disconnected: " + deviceDescription.getDeviceID());
     }
 
     @Override
     public void log(int logLevel, String daId, String message) throws RemoteException
     {
-      this.updateLog("LOG! Level: " + logLevel + "; DA: " + daId + "; Message: " + message + ";");
+      updateLog("LOG! Level: " + logLevel + "; DA: " + daId + "; Message: " + message + ";");
     }
 
     @Override
     public void onDAConnected(String daId) throws RemoteException
     {
-      this.updateLog("Device Adapter " + daId + " completed the initialization phase");
+      updateLog("Device Adapter " + daId + " completed the initialization phase");
     }
 
-    private void updateLog(String log)
-    {
-      Log.d(LOGTAG, log);
-
-      final String fLog = log;
-
-      final TextView tv = (TextView)findViewById(R.id.logBox);
-      tv.post(new Runnable()
-      {
-        @Override
-        public void run()
-        {
-          tv.append(fLog + "\n");
-        }
-      });
-
-      final ScrollView sv = (ScrollView)findViewById(R.id.scrollBox);
-      sv.postDelayed(new Runnable()
-      {
-        @Override
-        public void run()
-        {
-          sv.fullScroll(ScrollView.FOCUS_DOWN);
-        }
-      }, 100L);
-    }
   }
 
   @Override
   protected void onCreate(Bundle savedInstanceState)
   {
     super.onCreate(savedInstanceState);
+    m_observationsFile = createObsFile();
     setContentView(R.layout.activity_main);
-    m_observationsFile = new File(getFilesDir(), "observations.dat");
     m_connManager = (ConnectivityManager)getSystemService(Context.CONNECTIVITY_SERVICE);
     PowerManager m_pwrManager = (PowerManager)getSystemService(Context.POWER_SERVICE);
     m_wakeLock = m_pwrManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MyWakeLock");
+    m_portEditText = (EditText)findViewById(R.id.port_edit_text);
+    m_ipAddressEditText = (EditText)findViewById(R.id.ip_address_edit_text);
+    m_ipAddressEditText.addTextChangedListener(new TextWatcher()
+    {
+      @Override
+      public void onTextChanged(CharSequence s, int start, int before, int count)
+      {
+      }
+
+      @Override
+      public void beforeTextChanged(CharSequence s, int start, int count, int after)
+      {
+      }
+
+      private String mPreviousText = "";
+
+      @Override
+      public void afterTextChanged(Editable s)
+      {
+        if (PARTIAl_IP_ADDRESS.matcher(s).matches())
+        {
+          mPreviousText = s.toString();
+        }
+        else
+        {
+          s.replace(0, s.length(), mPreviousText);
+        }
+      }
+    });
+  }
+
+  private File createObsFile()
+  {
+    File path = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS);
+    path.mkdirs();
+    return new File(path, "observations.dat");
   }
 
   public void startService(View v)
@@ -709,7 +732,7 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
     //((TextView)findViewById(R.id.logBox)).setText("");
   }
 
-  private void updateLog(String log)
+  public void updateLog(String log)
   {
     Log.d(LOGTAG, log);
 

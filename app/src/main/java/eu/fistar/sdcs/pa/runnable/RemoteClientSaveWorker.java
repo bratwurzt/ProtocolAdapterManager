@@ -22,11 +22,15 @@ import eu.fistar.sdcs.pa.helper.XORShiftRandom;
 public class RemoteClientSaveWorker extends ClientWorker
 {
   private Socket m_socket;
+  private String m_ipAddress;
+  private Integer m_port;
 
-  public RemoteClientSaveWorker(ZephyrProtos.ObservationsPB observations, Socket socket)
+  public RemoteClientSaveWorker(ZephyrProtos.ObservationsPB observations, Socket socket, String ipAddress, Integer port)
   {
     super(observations);
     m_socket = socket;
+    m_ipAddress = ipAddress;
+    m_port = port;
   }
 
   @Override
@@ -58,7 +62,7 @@ public class RemoteClientSaveWorker extends ClientWorker
     {
       try
       {
-        m_socket = createSocket(8100);
+        m_socket = createSocket(m_port, m_ipAddress);
       }
       catch (IOException e)
       {
@@ -67,7 +71,7 @@ public class RemoteClientSaveWorker extends ClientWorker
     }
   }
 
-  private Socket createSocket(int serverPort) throws IOException
+  private Socket createSocket(int serverPort, String serverIPAddress) throws IOException
   {
     XORShiftRandom xorShiftRandom = new XORShiftRandom();
     int localPort = xorShiftRandom.nextInt(49152, 55535);
@@ -89,6 +93,6 @@ public class RemoteClientSaveWorker extends ClientWorker
         }
       }
     }
-    return SocketFactory.getDefault().createSocket(InetAddress.getByName("188.230.143.188"), serverPort, localInetAddress, localPort);
+    return SocketFactory.getDefault().createSocket(InetAddress.getByName(serverIPAddress), serverPort, localInetAddress, localPort);
   }
 }
