@@ -86,6 +86,8 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
   }
   private static final Pattern PARTIAl_IP_ADDRESS =
         Pattern.compile("^((25[0-5]|2[0-4][0-9]|[0-1][0-9]{2}|[1-9][0-9]|[0-9])\\.){0,3}((25[0-5]|2[0-4][0-9]|[0-1][0-9]{2}|[1-9][0-9]|[0-9])){0,1}$");
+  public static int BATCH_TIME = 2000;
+  private Long m_lastTime;
   private final SimpleDateFormat m_dateFormat = new SimpleDateFormat("yyyyMMddhhmm'.csv'");
   private static final String LOGTAG = "PA Activity";
   private IProtocolAdapter pa;
@@ -199,7 +201,6 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
 
   class LooperThread extends IProtocolAdapterListener.Stub implements Runnable
   {
-    //private KeyStore m_keystore;
     private Socket m_socket;
 
     public LooperThread(KeyStore keystore)
@@ -210,6 +211,7 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
     @Override
     public void run()
     {
+      m_lastTime = System.currentTimeMillis();
       Looper.prepare();
       mHandler = new Handler();
       Looper.loop();
@@ -251,10 +253,11 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
         }
       }
 
-      if (m_observations != null && m_observations.size() >= 50)
+      if (System.currentTimeMillis() - BATCH_TIME > m_lastTime)
       {
         saveData();
         m_observations.clear();
+        m_lastTime = System.currentTimeMillis();
       }
     }
 

@@ -58,7 +58,7 @@ public class RemoteClientSaveWorker extends ClientWorker
 
   private void checkSocket()
   {
-    if (m_socket == null || !m_socket.isConnected() || m_socket.isClosed())
+    if (m_socket == null/* || !m_socket.isConnected() || m_socket.isClosed()*/)
     {
       try
       {

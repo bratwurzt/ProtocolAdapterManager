@@ -37,7 +37,10 @@ public abstract class ClientWorker implements Runnable
       }
       finally
       {
-        getOutputStream().close();
+        if (m_outputStream != null)
+        {
+          m_outputStream.close();
+        }
       }
     }
     catch (Exception e)
