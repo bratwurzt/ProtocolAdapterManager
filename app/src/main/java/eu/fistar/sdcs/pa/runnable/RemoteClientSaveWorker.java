@@ -10,65 +10,106 @@ import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
 import java.security.UnrecoverableKeyException;
 import java.security.cert.CertificateException;
+import java.util.ArrayList;
 import java.util.Enumeration;
+import java.util.List;
+import java.util.concurrent.BlockingQueue;
 import javax.net.SocketFactory;
 
+import android.annotation.TargetApi;
+import android.os.Build;
 import eu.fistar.sdcs.pa.ZephyrProtos;
+import eu.fistar.sdcs.pa.common.Observation;
 import eu.fistar.sdcs.pa.helper.XORShiftRandom;
 
 /**
  * @author bratwurzt
  */
-public class RemoteClientSaveWorker extends ClientWorker
+public class RemoteClientSaveWorker implements Runnable
 {
   private Socket m_socket;
   private String m_ipAddress;
   private Integer m_port;
+  protected final BlockingQueue<Observation> m_observations;
+  protected OutputStream m_outputStream;
 
-  public RemoteClientSaveWorker(ZephyrProtos.ObservationsPB observations, Socket socket, String ipAddress, Integer port)
+  public RemoteClientSaveWorker(BlockingQueue<Observation> observations, Socket socket, String ipAddress, Integer port)
   {
-    super(observations);
+    m_observations = observations;
     m_socket = socket;
     m_ipAddress = ipAddress;
     m_port = port;
   }
 
+  @TargetApi(Build.VERSION_CODES.KITKAT)
   @Override
+  public void run()
+  {
+    try
+    {
+      List<Observation> tempList = new ArrayList<>();
+      try (OutputStream outputStream = getOutputStream())
+      {
+        ZephyrProtos.ObservationsPB.Builder builder = ZephyrProtos.ObservationsPB.newBuilder();
+        Observation obs;
+        synchronized (m_observations)
+        {
+          while ((obs = m_observations.poll()) != null)
+          {
+            tempList.add(obs);
+            builder.addObservations(
+                ZephyrProtos.ObservationPB.newBuilder()
+                    .setName(obs.getPropertyName())
+                    .setUnit(obs.getMeasurementUnit())
+                    .setTime(obs.getPhenomenonTime())
+                    .setDuration((int)obs.getDuration())
+                    .addAllValues(obs.getValues())
+            );
+          }
+        }
+        builder.build().writeTo(outputStream);
+      }
+      catch (Exception e)
+      {
+        synchronized (m_observations)
+        {
+          m_observations.addAll(tempList);
+        }
+      }
+      finally
+      {
+        if (m_outputStream != null)
+        {
+          m_outputStream.close();
+        }
+      }
+    }
+    catch (Exception e)
+    {
+      e.printStackTrace();
+    }
+  }
+
   public OutputStream getOutputStream()
       throws CertificateException, UnrecoverableKeyException, NoSuchAlgorithmException, KeyStoreException, KeyManagementException, IOException
   {
     if (m_outputStream == null)
     {
-      checkSocket();
+      if (m_socket == null/* || !m_socket.isConnected() || m_socket.isClosed()*/)
+      {
+        try
+        {
+          m_socket = createSocket(m_port, m_ipAddress);
+        }
+        catch (IOException e)
+        {
+          e.printStackTrace();
+        }
+      }
+
       m_outputStream = m_socket.getOutputStream();
     }
     return m_outputStream;
-  }
-
-  @Override
-  protected void write(OutputStream outputStream) throws Exception
-  {
-    m_observations.writeTo(outputStream);
-  }
-
-  @Override
-  public void close() throws IOException
-  {
-  }
-
-  private void checkSocket()
-  {
-    if (m_socket == null/* || !m_socket.isConnected() || m_socket.isClosed()*/)
-    {
-      try
-      {
-        m_socket = createSocket(m_port, m_ipAddress);
-      }
-      catch (IOException e)
-      {
-        e.printStackTrace();
-      }
-    }
   }
 
   private Socket createSocket(int serverPort, String serverIPAddress) throws IOException

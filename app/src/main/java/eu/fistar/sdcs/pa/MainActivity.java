@@ -27,8 +27,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.regex.Pattern;
 
 import android.content.ComponentName;
@@ -68,7 +70,6 @@ import eu.fistar.sdcs.pa.dialogs.IPADialogListener;
 import eu.fistar.sdcs.pa.dialogs.SendCommandDialogFragment;
 import eu.fistar.sdcs.pa.dialogs.StartDaDialogFragment;
 import eu.fistar.sdcs.pa.dialogs.StopDaDialogFragment;
-import eu.fistar.sdcs.pa.runnable.LocalClientSaveWorker;
 import eu.fistar.sdcs.pa.runnable.RemoteClientSaveWorker;
 
 /**
@@ -97,12 +98,11 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
   private Handler mHandler = null;
   private LooperThread looperThread;
   private String format = m_dateFormat.format(new Date());
-  private File m_observationsFile;
+  //private File m_observationsFile;
   private ConnectivityManager m_connManager;
   private KeyStore m_keystore;
-  private File m_observationLocalFile;
   private PowerManager.WakeLock m_wakeLock;
-  private List<Observation> m_observations = new ArrayList<>();
+  protected final BlockingQueue<Observation> m_observations = new LinkedBlockingQueue<>();
   private EditText m_ipAddressEditText, m_portEditText;
 
   private ServiceConnection serv = new ServiceConnection()
@@ -230,111 +230,84 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
       for (Observation obs : observations)
       {
         String propertyName = obs.getPropertyName();
-        if ("respiration rate".equals(propertyName)
-            || "y-axis accelerometer".equals(propertyName)
-            || "y-axis acceleration peak".equals(propertyName)
-            || "x-axis accelerometer".equals(propertyName)
-            || "x-axis acceleration peak".equals(propertyName)
-            || "z-axis accelerometer".equals(propertyName)
-            || "z-axis acceleration peak".equals(propertyName)
-            || "accelerometer x".equals(propertyName)
-            || "accelerometer y".equals(propertyName)
-            || "accelerometer z".equals(propertyName)
-            || "r to r".equals(propertyName)
-            || "vmu".equals(propertyName)
-            || "breathing wave amplitude".equals(propertyName)
-            || "heart rate".equals(propertyName)
-            || "peak acceleration".equals(propertyName)
-            || "posture".equals(propertyName)
-            || "ecg".equals(propertyName)
-            || "ecg amplitude".equals(propertyName))
+        if (!"galvanic skin response".equals(propertyName)
+            && !"temperature".equals(propertyName)
+            && !"zephyr sys chan".equals(propertyName)
+            && !"user intf btn status".equals(propertyName)
+            )
         {
-          m_observations.add(obs);
+          synchronized (m_observations)
+          {
+            m_observations.add(obs);
+            if (m_observations.size() > 1000)
+            {
+              m_observations.poll();
+            }
+          }
         }
       }
 
       if (System.currentTimeMillis() - BATCH_TIME > m_lastTime)
       {
         saveData();
-        m_observations.clear();
         m_lastTime = System.currentTimeMillis();
       }
     }
 
     private void saveData()
     {
-      ZephyrProtos.ObservationsPB.Builder builder = ZephyrProtos.ObservationsPB.newBuilder();
-      for (Observation obs : m_observations)
+      NetworkInfo activeNetInfo = m_connManager.getActiveNetworkInfo();
+      if ("WIFI".equals(activeNetInfo.getTypeName()))
       {
-        builder.addObservations(
-            ZephyrProtos.ObservationPB.newBuilder()
-                .setName(obs.getPropertyName())
-                .setUnit(obs.getMeasurementUnit())
-                .setTime(obs.getPhenomenonTime())
-                .setDuration((int)obs.getDuration())
-                .addAllValues(obs.getValues())
-        );
+        //ZephyrProtos.ObservationsPB obss = getFileObservations(m_observationsFile);
+        //if (obss != null && obss.getObservationsCount() > 0)
+        //{
+        //  builder.addAllObservations(obss.getObservationsList());
+        //  emptyObservationFile();
+        //}
+        String ipAddress = m_ipAddressEditText.getText().toString();
+        Integer port = Integer.parseInt(m_portEditText.getText().toString());
+        m_queryThreadExecutor.execute(new RemoteClientSaveWorker(m_observations, m_socket, ipAddress, port));
       }
-      try
-      {
-        NetworkInfo activeNetInfo = m_connManager.getActiveNetworkInfo();
-        if ("WIFI".equals(activeNetInfo.getTypeName()))
-        {
-          ZephyrProtos.ObservationsPB obss = getFileObservations(m_observationsFile);
-          if (obss != null && obss.getObservationsCount() > 0)
-          {
-            builder.addAllObservations(obss.getObservationsList());
-            emptyObservationFile();
-          }
-          String ipAddress = m_ipAddressEditText.getText().toString();
-          Integer port = Integer.parseInt(m_portEditText.getText().toString());
-          ZephyrProtos.ObservationsPB observationsPB = builder.build();
-          m_queryThreadExecutor.execute(new RemoteClientSaveWorker(observationsPB, m_socket, ipAddress, port));
-        }
-        else
-        {
-          ZephyrProtos.ObservationsPB observationsPB = builder.build();
-          m_queryThreadExecutor.execute(new LocalClientSaveWorker(m_observationsFile, observationsPB));
-        }
-      }
-      catch (IOException e)
-      {
-        e.printStackTrace();
-      }
+      //else
+      //{
+      //  ZephyrProtos.ObservationsPB observationsPB = builder.build();
+      //  m_queryThreadExecutor.execute(new LocalClientSaveWorker(m_observationsFile, observationsPB));
+      //}
     }
 
-    private void emptyObservationFile()
-    {
-      String string1 = "";
-      FileOutputStream fos;
-      try
-      {
-        fos = new FileOutputStream(m_observationsFile, false);
-        FileWriter fWriter;
-
-        try
-        {
-          fWriter = new FileWriter(fos.getFD());
-
-          fWriter.write(string1);
-          fWriter.flush();
-          fWriter.close();
-        }
-        catch (Exception e)
-        {
-          e.printStackTrace();
-        }
-        finally
-        {
-          fos.getFD().sync();
-          fos.close();
-        }
-      }
-      catch (Exception e)
-      {
-        e.printStackTrace();
-      }
-    }
+    //private void emptyObservationFile()
+    //{
+    //  String string1 = "";
+    //  FileOutputStream fos;
+    //  try
+    //  {
+    //    fos = new FileOutputStream(m_observationsFile, false);
+    //    FileWriter fWriter;
+    //
+    //    try
+    //    {
+    //      fWriter = new FileWriter(fos.getFD());
+    //
+    //      fWriter.write(string1);
+    //      fWriter.flush();
+    //      fWriter.close();
+    //    }
+    //    catch (Exception e)
+    //    {
+    //      e.printStackTrace();
+    //    }
+    //    finally
+    //    {
+    //      fos.getFD().sync();
+    //      fos.close();
+    //    }
+    //  }
+    //  catch (Exception e)
+    //  {
+    //    e.printStackTrace();
+    //  }
+    //}
 
     private ZephyrProtos.ObservationsPB getFileObservations(File observationsFile) throws IOException
     {
@@ -381,7 +354,7 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
   protected void onCreate(Bundle savedInstanceState)
   {
     super.onCreate(savedInstanceState);
-    m_observationsFile = createObsFile();
+    //m_observationsFile = createObsFile();
     setContentView(R.layout.activity_main);
     m_connManager = (ConnectivityManager)getSystemService(Context.CONNECTIVITY_SERVICE);
     PowerManager m_pwrManager = (PowerManager)getSystemService(Context.POWER_SERVICE);
