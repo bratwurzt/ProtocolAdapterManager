@@ -32,10 +32,12 @@ public class RemoteClientSaveWorker implements Runnable
   private Integer m_port;
   protected final BlockingQueue<Observation> m_observations;
   protected OutputStream m_outputStream;
+  protected ZephyrProtos.ObservationsPB m_obss;
 
-  public RemoteClientSaveWorker(BlockingQueue<Observation> observations, Socket socket, String ipAddress, Integer port)
+  public RemoteClientSaveWorker(BlockingQueue<Observation> observations, ZephyrProtos.ObservationsPB obss, Socket socket, String ipAddress, Integer port)
   {
     m_observations = observations;
+    m_obss = obss;
     m_socket = socket;
     m_ipAddress = ipAddress;
     m_port = port;
@@ -66,6 +68,10 @@ public class RemoteClientSaveWorker implements Runnable
                     .addAllValues(obs.getValues())
             );
           }
+        }
+        if (m_obss != null && m_obss.getObservationsCount() > 0)
+        {
+          builder.addAllObservations(m_obss.getObservationsList());
         }
         builder.build().writeTo(outputStream);
       }

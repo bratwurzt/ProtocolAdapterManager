@@ -70,6 +70,7 @@ import eu.fistar.sdcs.pa.dialogs.IPADialogListener;
 import eu.fistar.sdcs.pa.dialogs.SendCommandDialogFragment;
 import eu.fistar.sdcs.pa.dialogs.StartDaDialogFragment;
 import eu.fistar.sdcs.pa.dialogs.StopDaDialogFragment;
+import eu.fistar.sdcs.pa.runnable.LocalClientSaveWorker;
 import eu.fistar.sdcs.pa.runnable.RemoteClientSaveWorker;
 
 /**
@@ -85,8 +86,9 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
   {
     System.setProperty("ssl.TrustManagerFactory.algorithm", javax.net.ssl.KeyManagerFactory.getDefaultAlgorithm());
   }
+
   private static final Pattern PARTIAl_IP_ADDRESS =
-        Pattern.compile("^((25[0-5]|2[0-4][0-9]|[0-1][0-9]{2}|[1-9][0-9]|[0-9])\\.){0,3}((25[0-5]|2[0-4][0-9]|[0-1][0-9]{2}|[1-9][0-9]|[0-9])){0,1}$");
+      Pattern.compile("^((25[0-5]|2[0-4][0-9]|[0-1][0-9]{2}|[1-9][0-9]|[0-9])\\.){0,3}((25[0-5]|2[0-4][0-9]|[0-1][0-9]{2}|[1-9][0-9]|[0-9])){0,1}$");
   public static int BATCH_TIME = 2000;
   private Long m_lastTime;
   private final SimpleDateFormat m_dateFormat = new SimpleDateFormat("yyyyMMddhhmm'.csv'");
@@ -98,7 +100,8 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
   private Handler mHandler = null;
   private LooperThread looperThread;
   private String format = m_dateFormat.format(new Date());
-  //private File m_observationsFile;
+  private File m_observationsFile;
+  public static final Object FILE_LOCK = new Object();
   private ConnectivityManager m_connManager;
   private KeyStore m_keystore;
   private PowerManager.WakeLock m_wakeLock;
@@ -226,7 +229,6 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
     @Override
     public void pushData(final List<Observation> observations, DeviceDescription deviceDescription) throws RemoteException
     {
-      //m_observations.addAll(observations);
       for (Observation obs : observations)
       {
         String propertyName = obs.getPropertyName();
@@ -239,10 +241,6 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
           synchronized (m_observations)
           {
             m_observations.add(obs);
-            if (m_observations.size() > 1000)
-            {
-              m_observations.poll();
-            }
           }
         }
       }
@@ -256,66 +254,90 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
 
     private void saveData()
     {
-      NetworkInfo activeNetInfo = m_connManager.getActiveNetworkInfo();
-      if ("WIFI".equals(activeNetInfo.getTypeName()))
+      String typeName;
+      try
       {
-        //ZephyrProtos.ObservationsPB obss = getFileObservations(m_observationsFile);
-        //if (obss != null && obss.getObservationsCount() > 0)
-        //{
-        //  builder.addAllObservations(obss.getObservationsList());
-        //  emptyObservationFile();
-        //}
+        NetworkInfo activeNetInfo = getConnManager().getActiveNetworkInfo();
+        typeName = activeNetInfo == null ? null : activeNetInfo.getTypeName();
+      }
+      catch (Exception e)
+      {
+        Log.e(LOGTAG, e.getMessage());
+        typeName = null;
+      }
+
+      if ("WIFI".equals(typeName))
+      {
+        ZephyrProtos.ObservationsPB obss = getFileObservations();
+        if (obss != null && obss.getObservationsCount() > 0)
+        {
+          emptyObservationFile();
+        }
         String ipAddress = m_ipAddressEditText.getText().toString();
         Integer port = Integer.parseInt(m_portEditText.getText().toString());
-        m_queryThreadExecutor.execute(new RemoteClientSaveWorker(m_observations, m_socket, ipAddress, port));
+        m_queryThreadExecutor.execute(new RemoteClientSaveWorker(m_observations, obss, m_socket, ipAddress, port));
       }
-      //else
-      //{
-      //  ZephyrProtos.ObservationsPB observationsPB = builder.build();
-      //  m_queryThreadExecutor.execute(new LocalClientSaveWorker(m_observationsFile, observationsPB));
-      //}
+      else if (m_observations.size() > 2000)
+      {
+        m_queryThreadExecutor.execute(new LocalClientSaveWorker(m_observationsFile, m_observations));
+      }
     }
 
-    //private void emptyObservationFile()
-    //{
-    //  String string1 = "";
-    //  FileOutputStream fos;
-    //  try
-    //  {
-    //    fos = new FileOutputStream(m_observationsFile, false);
-    //    FileWriter fWriter;
-    //
-    //    try
-    //    {
-    //      fWriter = new FileWriter(fos.getFD());
-    //
-    //      fWriter.write(string1);
-    //      fWriter.flush();
-    //      fWriter.close();
-    //    }
-    //    catch (Exception e)
-    //    {
-    //      e.printStackTrace();
-    //    }
-    //    finally
-    //    {
-    //      fos.getFD().sync();
-    //      fos.close();
-    //    }
-    //  }
-    //  catch (Exception e)
-    //  {
-    //    e.printStackTrace();
-    //  }
-    //}
-
-    private ZephyrProtos.ObservationsPB getFileObservations(File observationsFile) throws IOException
+    private void emptyObservationFile()
     {
-      if (!observationsFile.exists())
+      String string1 = "";
+      FileOutputStream fos;
+      try
+      {
+        synchronized (FILE_LOCK)
+        {
+          fos = new FileOutputStream(m_observationsFile, false);
+          FileWriter fWriter;
+
+          try
+          {
+            fWriter = new FileWriter(fos.getFD());
+
+            fWriter.write(string1);
+            fWriter.flush();
+            fWriter.close();
+          }
+          catch (Exception e)
+          {
+            e.printStackTrace();
+          }
+          finally
+          {
+            fos.getFD().sync();
+            fos.close();
+          }
+        }
+      }
+      catch (Exception e)
+      {
+        e.printStackTrace();
+      }
+    }
+
+    private ZephyrProtos.ObservationsPB getFileObservations()
+    {
+      if (!m_observationsFile.exists())
       {
         return null;
       }
-      return ZephyrProtos.ObservationsPB.parseDelimitedFrom(new FileInputStream(observationsFile));
+      ZephyrProtos.ObservationsPB observationsPB = null;
+      try
+      {
+        synchronized (FILE_LOCK)
+        {
+          observationsPB = ZephyrProtos.ObservationsPB.parseDelimitedFrom(new FileInputStream(m_observationsFile));
+        }
+      }
+      catch (IOException e)
+      {
+        e.printStackTrace();
+      }
+      return observationsPB;
     }
 
     @Override
@@ -350,13 +372,24 @@ public class MainActivity extends FragmentActivity implements IPADialogListener
 
   }
 
+  private ConnectivityManager getConnManager()
+  {
+    if (m_connManager == null)
+    {
+      m_connManager = (ConnectivityManager)getSystemService(Context.CONNECTIVITY_SERVICE);
+    }
+    return m_connManager;
+  }
+
   @Override
   protected void onCreate(Bundle savedInstanceState)
   {
     super.onCreate(savedInstanceState);
-    //m_observationsFile = createObsFile();
+    synchronized (FILE_LOCK)
+    {
+      m_observationsFile = createObsFile();
+    }
     setContentView(R.layout.activity_main);
-    m_connManager = (ConnectivityManager)getSystemService(Context.CONNECTIVITY_SERVICE);
     PowerManager m_pwrManager = (PowerManager)getSystemService(Context.POWER_SERVICE);
     m_wakeLock = m_pwrManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MyWakeLock");
     m_portEditText = (EditText)findViewById(R.id.port_edit_text);
